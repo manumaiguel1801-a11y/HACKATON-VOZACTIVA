@@ -1,0 +1,7 @@
+{
+  "name": "Remix: Voz-Activa",
+  "description": "Inclusión financiera para vendedores informales con agente IA, OCR de fiados y pasaporte crediticio.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
