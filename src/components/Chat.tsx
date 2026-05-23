@@ -84,13 +84,13 @@ interface Message {
 }
 
 const TYPE_LABELS: Record<string, { label: string; icon: React.ReactNode; color: string }> = {
-  'venta': { label: 'Venta registrada', icon: <ShoppingBag className="w-4 h-4" />, color: 'text-[#B8860B]' },
-  'gasto': { label: 'Gasto registrado', icon: <TrendingDown className="w-4 h-4" />, color: 'text-red-500' },
-  'compra': { label: 'Compra registrada', icon: <ArrowDownToLine className="w-4 h-4" />, color: 'text-[#B8860B]' },
-  'deuda-me-deben': { label: 'Deuda a cobrar', icon: <UserPlus className="w-4 h-4" />, color: 'text-[#B8860B]' },
-  'deuda-debo': { label: 'Deuda registrada', icon: <UserMinus className="w-4 h-4" />, color: 'text-orange-500' },
-  'pago-deuda-debo': { label: 'Pago de deuda', icon: <CreditCard className="w-4 h-4" />, color: 'text-green-500' },
-  'cobro-deuda-me-deben': { label: 'Cobro de deuda', icon: <CreditCard className="w-4 h-4" />, color: 'text-[#B8860B]' },
+  'venta':                 { label: 'Venta registrada',    icon: <ShoppingBag className="w-4 h-4" />,       color: 'text-[#B8860B]' },
+  'gasto':                 { label: 'Gasto registrado',    icon: <TrendingDown className="w-4 h-4" />,      color: 'text-red-500' },
+  'compra':                { label: 'Compra registrada',   icon: <ArrowDownToLine className="w-4 h-4" />,   color: 'text-[#B8860B]' },
+  'deuda-me-deben':        { label: 'Deuda a cobrar',      icon: <UserPlus className="w-4 h-4" />,          color: 'text-[#B8860B]' },
+  'deuda-debo':            { label: 'Deuda registrada',    icon: <UserMinus className="w-4 h-4" />,         color: 'text-orange-500' },
+  'pago-deuda-debo':       { label: 'Pago de deuda',       icon: <CreditCard className="w-4 h-4" />,        color: 'text-green-500' },
+  'cobro-deuda-me-deben':  { label: 'Cobro de deuda',      icon: <CreditCard className="w-4 h-4" />,        color: 'text-[#B8860B]' },
 };
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -260,15 +260,13 @@ async function saveToFirestore(userId: string, data: NonNullable<ChatResponse['d
       type: 'me-deben',
       status: 'pendiente',
     });
-    // ✅ Gasto SIN items[] para que el modal muestre solo Concepto + Total gasto
     await addDoc(collection(db, 'users', userId, 'expenses'), {
       concept: `Préstamo a ${name}`,
       amount: data.amount,
+      items: [{ product: `Préstamo a ${name}`, quantity: 1, unitPrice: data.amount, subtotal: data.amount }],
       createdAt: serverTimestamp(),
       source: 'chat',
-      // sin items[] → el modal muestra la vista simple de Concepto
     });
-
   } else if (data.type === 'deuda-debo') {
     const name = capitalizar(data.debtorName || data.concept);
     await addDoc(collection(db, 'users', userId, 'debts'), {
@@ -280,7 +278,6 @@ async function saveToFirestore(userId: string, data: NonNullable<ChatResponse['d
     await addDoc(collection(db, 'users', userId, 'sales'), {
       concept: `Préstamo de ${name}`,
       total: data.amount,
-      isIngreso: true,
       createdAt: serverTimestamp(),
       source: 'chat',
     });
@@ -1194,10 +1191,10 @@ export const Chat = ({ isDarkMode, userId, debts, inventory }: Props) => {
               {pendingProduct.step === 'asking-precio-compra'
                 ? `¿A cuánto compraste ${conArticulo(pendingProduct.concept)}?`
                 : pendingProduct.step === 'asking-si-vende'
-                  ? `¿Vas a vender ${conArticulo(pendingProduct.concept)}?`
-                  : pendingProduct.step === 'asking-precio-venta'
-                    ? `¿A cuánto vendes ${conArticulo(pendingProduct.concept)}?`
-                    : `¿Cuánto stock tienes de ${conArticulo(pendingProduct.concept)}?`}
+                ? `¿Vas a vender ${conArticulo(pendingProduct.concept)}?`
+                : pendingProduct.step === 'asking-precio-venta'
+                ? `¿A cuánto vendes ${conArticulo(pendingProduct.concept)}?`
+                : `¿Cuánto stock tienes de ${conArticulo(pendingProduct.concept)}?`}
             </span>
             <button
               onClick={() => { setPendingProduct(null); addBotMsg('Ok, cancelado.'); }}
@@ -1227,12 +1224,12 @@ export const Chat = ({ isDarkMode, userId, debts, inventory }: Props) => {
                 pendingProduct?.step === 'asking-precio-compra' || pendingProduct?.step === 'asking-precio-venta'
                   ? 'Escribe el precio, ej: 1500 o 5 mil...'
                   : pendingProduct?.step === 'asking-si-vende'
-                    ? 'Responde sí o no...'
-                    : pendingProduct?.step === 'asking-stock'
-                      ? 'Escribe el total de unidades disponibles...'
-                      : isListening
-                        ? 'Escuchando...'
-                        : 'Ej: vendí 3 almuerzos por 45 mil...'
+                  ? 'Responde sí o no...'
+                  : pendingProduct?.step === 'asking-stock'
+                  ? 'Escribe el total de unidades disponibles...'
+                  : isListening
+                  ? 'Escuchando...'
+                  : 'Ej: vendí 3 almuerzos por 45 mil...'
               }
               type="text"
               value={input}

@@ -1,13 +1,13 @@
 import React from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { X, ShoppingBag, TrendingDown, UserPlus, UserMinus, Calendar, Send, MessageCircle, Camera, Pencil, ArrowUp, ArrowDown } from 'lucide-react';
+import { X, ShoppingBag, TrendingDown, UserPlus, UserMinus, Calendar, Send, MessageCircle, Camera, Pencil, ArrowUp } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { Sale, Expense, Debt, getSaleLabel } from '../types';
 
 type DetailItem =
-  | { kind: 'sale'; data: Sale }
+  | { kind: 'sale';    data: Sale }
   | { kind: 'expense'; data: Expense }
-  | { kind: 'debt'; data: Debt };
+  | { kind: 'debt';    data: Debt };
 
 interface Props {
   item: DetailItem;
@@ -16,11 +16,11 @@ interface Props {
 }
 
 const SOURCE_CONFIG: Record<string, { label: string; color: string; Icon: React.ElementType }> = {
-  telegram: { label: 'Telegram', color: '#229ED9', Icon: Send },
-  whatsapp: { label: 'WhatsApp', color: '#25D366', Icon: MessageCircle },
-  chat: { label: 'Chat IA', color: '#8B5CF6', Icon: MessageCircle },
-  camara: { label: 'Cámara', color: '#F59E0B', Icon: Camera },
-  manual: { label: 'Manual', color: '#9CA3AF', Icon: Pencil },
+  telegram: { label: 'Telegram',  color: '#229ED9', Icon: Send },
+  whatsapp: { label: 'WhatsApp',  color: '#25D366', Icon: MessageCircle },
+  chat:     { label: 'Chat IA',   color: '#8B5CF6', Icon: MessageCircle },
+  camara:   { label: 'Cámara',    color: '#F59E0B', Icon: Camera },
+  manual:   { label: 'Manual',    color: '#9CA3AF', Icon: Pencil },
 };
 
 function SourceRow({ source, isDarkMode }: { source?: string; isDarkMode: boolean }) {
@@ -53,57 +53,34 @@ const Row = ({ label, value, isDarkMode, highlight }: { label: string; value: st
 );
 
 export const MovementDetailModal = ({ item, isDarkMode, onClose }: Props) => {
-  const isSale = item.kind === 'sale';
+  const isSale    = item.kind === 'sale';
   const isExpense = item.kind === 'expense';
-  const isDebt = item.kind === 'debt';
+  const isDebt    = item.kind === 'debt';
 
-  // Leer el concept del documento — cubre registros de chat (concept directo)
-  // y registros de bots Telegram/WhatsApp (solo guardan items[0].product sin concept raíz)
-  const dataConcept: string =
-    (item.data as any).concept ??
-    (item.data as any).items?.[0]?.product ??
-    (item.data as any).product ??
-    '';
+  // FIX 3: detectar cobros de deuda dentro de ventas
+  const isCobro = isSale && /^cobro/i.test(item.data.items?.[0]?.product ?? item.data.product ?? '');
 
-  // CASO 1 — Gasto simple: préstamo dado o pago de deuda (guardado en sales por error legacy o edge case)
-  const isGastoSimple = isSale && /^(préstamo a|pago deuda)/i.test(dataConcept);
+  const accentColor = isCobro ? '#22c55e' : isSale ? '#B8860B' : isExpense ? '#ef4444' : item.kind === 'debt' && item.data.type === 'me-deben' ? '#B8860B' : '#f97316';
 
-  // CASO 2 — Ingreso simple: préstamo recibido o cobro de deuda
-  const isIngresoSimple = isSale && (
-    /^(préstamo de|cobro deuda)/i.test(dataConcept) ||
-    !!(item.data as any).isIngreso
-  );
-
-  const accentColor = isIngresoSimple ? '#22c55e'
-    : isGastoSimple ? '#ef4444'
-    : isSale ? '#B8860B'
-    : isExpense ? '#ef4444'
-    : item.kind === 'debt' && item.data.type === 'me-deben' ? '#B8860B'
-    : '#f97316';
-
-  const headerIcon = isIngresoSimple
+  const headerIcon = isCobro
     ? <ArrowUp className="w-5 h-5" />
-    : isGastoSimple
-      ? <ArrowDown className="w-5 h-5" />
-      : isSale
-        ? <ShoppingBag className="w-5 h-5" />
-        : isExpense
-          ? <TrendingDown className="w-5 h-5" />
-          : item.data.type === 'me-deben'
-            ? <UserPlus className="w-5 h-5" />
-            : <UserMinus className="w-5 h-5" />;
+    : isSale
+      ? <ShoppingBag className="w-5 h-5" />
+      : isExpense
+        ? <TrendingDown className="w-5 h-5" />
+        : item.data.type === 'me-deben'
+          ? <UserPlus className="w-5 h-5" />
+          : <UserMinus className="w-5 h-5" />;
 
-  const headerTitle = isIngresoSimple
+  const headerTitle = isCobro
     ? 'Detalle de Ingreso'
-    : isGastoSimple
-      ? 'Detalle de Gasto'
-      : isSale
-        ? 'Detalle de Venta'
-        : isExpense
-          ? 'Detalle de Gasto'
-          : item.data.type === 'me-deben'
-            ? 'Me deben'
-            : 'Debo';
+    : isSale
+      ? 'Detalle de Venta'
+      : isExpense
+        ? 'Detalle de Gasto'
+        : item.data.type === 'me-deben'
+          ? 'Me deben'
+          : 'Debo';
 
   return (
     <AnimatePresence>
@@ -156,52 +133,37 @@ export const MovementDetailModal = ({ item, isDarkMode, onClose }: Props) => {
             {/* ── SALE ── */}
             {isSale && (() => {
               const sale = item.data;
-              const hasItems = (sale.items?.length ?? 0) > 0;
+              const hasItems = sale.items?.length > 0;
 
-              // CASO 1 — Gasto simple
-              if (isGastoSimple) {
-                return (
-                  <>
-                    <Row label="Concepto" value={dataConcept || '—'} isDarkMode={isDarkMode} />
-                    <SourceRow source={sale.source} isDarkMode={isDarkMode} />
-                    <div className={cn('flex justify-between items-center p-4 rounded-xl mt-2', isDarkMode ? 'bg-red-500/10' : 'bg-red-50')}>
-                      <span className="font-black text-sm opacity-60">Total gasto</span>
-                      <span className="text-2xl font-black text-red-500">-${sale.total.toLocaleString('es-CO')}</span>
-                    </div>
-                  </>
-                );
-              }
-
-              // CASO 2 — Ingreso simple
-              if (isIngresoSimple) {
-                return (
-                  <>
-                    <Row label="Concepto" value={dataConcept || '—'} isDarkMode={isDarkMode} />
-                    <SourceRow source={sale.source} isDarkMode={isDarkMode} />
-                    <div className={cn('flex justify-between items-center p-4 rounded-xl mt-2', isDarkMode ? 'bg-green-500/10' : 'bg-green-50')}>
-                      <span className="font-black text-sm opacity-60">Total Ingreso</span>
-                      <span className="text-2xl font-black text-green-500">${sale.total.toLocaleString('es-CO')}</span>
-                    </div>
-                  </>
-                );
-              }
-
-              // CASO 3 — Venta normal
               return (
                 <>
-                  {hasItems ? (
+                  {isCobro || !hasItems ? (
+                    <>
+                      <Row
+                        label="Concepto"
+                        value={sale.concept ?? sale.items?.[0]?.product ?? (sale as any).product ?? '—'}
+                        isDarkMode={isDarkMode}
+                      />
+                      <SourceRow source={sale.source} isDarkMode={isDarkMode} />
+                      <div className={cn('flex justify-between items-center p-4 rounded-xl mt-2', isDarkMode ? 'bg-green-500/10' : 'bg-green-50')}>
+                        <span className="font-black text-sm opacity-60">Total Ingreso</span>
+                        <span className="text-2xl font-black text-green-500">${sale.total.toLocaleString('es-CO')}</span>
+                      </div>
+                    </>
+                  ) : hasItems ? (
                     <div className="space-y-1 mb-4">
                       <p className={cn('text-[11px] font-black uppercase tracking-widest mb-3', isDarkMode ? 'text-white/40' : 'text-black/40')}>
                         Productos vendidos
                       </p>
-                      <div className={cn('grid text-[10px] font-black uppercase tracking-widest opacity-40 px-4 pb-1 gap-2')}
-                        style={{ gridTemplateColumns: '1fr 48px 80px 80px' }}>
+                      {/* Table header */}
+                      <div className={cn('grid text-[10px] font-black uppercase tracking-widest opacity-40 px-4 pb-1',
+                        'gap-2')} style={{ gridTemplateColumns: '1fr 48px 80px 80px' }}>
                         <span>Producto</span>
                         <span className="text-center">Cant.</span>
                         <span className="text-right">P. Unit.</span>
                         <span className="text-right">Subtotal</span>
                       </div>
-                      {sale.items!.map((it, i) => {
+                      {sale.items.map((it, i) => {
                         const hasDiscount = !!(it.regularUnitPrice && it.regularUnitPrice !== it.unitPrice);
                         const regularSubtotal = hasDiscount ? it.quantity * it.regularUnitPrice! : null;
                         return (
@@ -254,16 +216,21 @@ export const MovementDetailModal = ({ item, isDarkMode, onClose }: Props) => {
                   ) : (
                     // Legacy single-product sale
                     <>
-                      <Row label="Producto" value={(sale as any).product ?? getSaleLabel(sale)} isDarkMode={isDarkMode} />
-                      <Row label="Cantidad" value={String((sale as any).quantity ?? 1)} isDarkMode={isDarkMode} />
-                      <Row label="Precio unitario" value={`$${((sale as any).unitPrice ?? 0).toLocaleString('es-CO')}`} isDarkMode={isDarkMode} />
+                      <Row label="Producto" value={sale.product ?? '—'} isDarkMode={isDarkMode} />
+                      <Row label="Cantidad" value={String(sale.quantity ?? 1)} isDarkMode={isDarkMode} />
+                      <Row label="Precio unitario" value={`$${(sale.unitPrice ?? 0).toLocaleString('es-CO')}`} isDarkMode={isDarkMode} />
                     </>
                   )}
-                  <SourceRow source={sale.source} isDarkMode={isDarkMode} />
-                  <div className={cn('flex justify-between items-center p-4 rounded-xl mt-2', isDarkMode ? 'bg-[#B8860B]/10' : 'bg-[#FFF8DC]')}>
-                    <span className="font-black text-sm opacity-60">Total venta</span>
-                    <span className="text-2xl font-black text-[#B8860B]">${sale.total.toLocaleString('es-CO')}</span>
-                  </div>
+
+                  {!isCobro && (
+                    <>
+                      <SourceRow source={sale.source} isDarkMode={isDarkMode} />
+                      <div className={cn('flex justify-between items-center p-4 rounded-xl mt-2', isDarkMode ? 'bg-[#B8860B]/10' : 'bg-[#FFF8DC]')}>
+                        <span className="font-black text-sm opacity-60">Total venta</span>
+                        <span className="text-2xl font-black text-[#B8860B]">${sale.total.toLocaleString('es-CO')}</span>
+                      </div>
+                    </>
+                  )}
                 </>
               );
             })()}
@@ -272,11 +239,9 @@ export const MovementDetailModal = ({ item, isDarkMode, onClose }: Props) => {
             {isExpense && (() => {
               const exp = item.data;
               const hasItems = exp.items && exp.items.length > 0;
-              const expConcept = exp.concept ?? exp.items?.[0]?.product ?? '';
-              const isSimpleDebtOp = /^(préstamo|pago deuda|cobro)/i.test(expConcept);
               return (
                 <>
-                  {hasItems && !isSimpleDebtOp ? (
+                  {hasItems ? (
                     <div className="space-y-1 mb-4">
                       <p className={cn('text-[11px] font-black uppercase tracking-widest mb-3', isDarkMode ? 'text-white/40' : 'text-black/40')}>
                         Productos comprados
@@ -303,13 +268,14 @@ export const MovementDetailModal = ({ item, isDarkMode, onClose }: Props) => {
                     </div>
                   ) : (
                     <>
-                      <Row label="Concepto" value={expConcept || '—'} isDarkMode={isDarkMode} />
+                      <Row label="Concepto" value={exp.concept} isDarkMode={isDarkMode} />
                       {(exp as any).category && (
                         <Row label="Categoría" value={(exp as any).category} isDarkMode={isDarkMode} />
                       )}
                     </>
                   )}
                   <SourceRow source={exp.source} isDarkMode={isDarkMode} />
+
                   <div className={cn('flex justify-between items-center p-4 rounded-xl mt-2', isDarkMode ? 'bg-red-500/10' : 'bg-red-50')}>
                     <span className="font-black text-sm opacity-60">Total gasto</span>
                     <span className="text-2xl font-black text-red-500">-${exp.amount.toLocaleString('es-CO')}</span>

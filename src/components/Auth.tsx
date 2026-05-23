@@ -20,7 +20,8 @@ import { cn } from '../lib/utils';
 import { auth, db } from '../firebase';
 import {
   signInWithEmailAndPassword,
-  createUserWithEmailAndPassword
+  createUserWithEmailAndPassword,
+  sendPasswordResetEmail,
 } from 'firebase/auth';
 import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
 
@@ -56,6 +57,8 @@ export const Auth = ({ isDarkMode }: AuthProps) => {
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [resetSent, setResetSent] = useState(false);
+  const [showEmailInUseHint, setShowEmailInUseHint] = useState(false);
 
   // Form State
   const [email, setEmail] = useState('');
@@ -70,6 +73,7 @@ export const Auth = ({ isDarkMode }: AuthProps) => {
     e.preventDefault();
     setLoading(true);
     setError('');
+    setShowEmailInUseHint(false);
 
     if (!isLogin) {
       const reqs = getPasswordRequirements(password);
@@ -110,6 +114,24 @@ export const Auth = ({ isDarkMode }: AuthProps) => {
           return;
         }
       }
+    } catch (err: any) {
+      if (err.code === 'auth/email-already-in-use') {
+        setShowEmailInUseHint(true);
+      }
+      setError(mensajeError(err.code ?? ''));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleResetPassword = async () => {
+    if (!email) return;
+    setLoading(true);
+    try {
+      await sendPasswordResetEmail(auth, email);
+      setResetSent(true);
+      setError('');
+      setShowEmailInUseHint(false);
     } catch (err: any) {
       setError(mensajeError(err.code ?? ''));
     } finally {
@@ -226,36 +248,36 @@ export const Auth = ({ isDarkMode }: AuthProps) => {
           {!isLogin && (
             <div className="space-y-4 animate-in fade-in slide-in-from-bottom-4 duration-500">
               <div className="grid grid-cols-2 gap-4">
-                <Input 
-                  icon={<User />} 
-                  placeholder="Nombres" 
-                  value={firstName} 
-                  onChange={setFirstName} 
+                <Input
+                  icon={<User />}
+                  placeholder="Nombres"
+                  value={firstName}
+                  onChange={setFirstName}
                   isDarkMode={isDarkMode}
                   required
                 />
-                <Input 
-                  icon={<User />} 
-                  placeholder="Apellidos" 
-                  value={lastName} 
-                  onChange={setLastName} 
+                <Input
+                  icon={<User />}
+                  placeholder="Apellidos"
+                  value={lastName}
+                  onChange={setLastName}
                   isDarkMode={isDarkMode}
                   required
                 />
               </div>
-              <Input 
-                icon={<IdCard />} 
-                placeholder="Número de Identificación" 
-                value={idNumber} 
-                onChange={setIdNumber} 
+              <Input
+                icon={<IdCard />}
+                placeholder="Número de Identificación"
+                value={idNumber}
+                onChange={setIdNumber}
                 isDarkMode={isDarkMode}
                 required
               />
-              <Input 
-                icon={<Phone />} 
-                placeholder="Teléfono" 
-                value={phone} 
-                onChange={setPhone} 
+              <Input
+                icon={<Phone />}
+                placeholder="Teléfono"
+                value={phone}
+                onChange={setPhone}
                 isDarkMode={isDarkMode}
                 required
               />
@@ -338,14 +360,40 @@ export const Auth = ({ isDarkMode }: AuthProps) => {
             )}
           </div>
 
-          {error && (
-            <div className="flex items-start gap-3 bg-[#FEE2E2] text-[#991B1B] px-4 py-3 rounded-xl">
-              <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />
-              <p className="text-sm font-medium leading-snug">{error}</p>
+          {resetSent && (
+            <div className="flex items-start gap-3 bg-green-50 text-green-800 px-4 py-3 rounded-xl">
+              <CheckCircle2 className="w-4 h-4 mt-0.5 shrink-0" />
+              <p className="text-sm font-medium leading-snug">
+                Te enviamos un correo para restablecer tu contraseña. Revisa tu bandeja de entrada.
+              </p>
             </div>
           )}
 
-          <button 
+          {error && !resetSent && (
+            <div className="space-y-2">
+              <div className="flex items-start gap-3 bg-[#FEE2E2] text-[#991B1B] px-4 py-3 rounded-xl">
+                <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />
+                <p className="text-sm font-medium leading-snug">{error}</p>
+              </div>
+              {showEmailInUseHint && email && (
+                <div className={cn('px-4 py-3 rounded-xl text-sm space-y-2', isDarkMode ? 'bg-[#1A1A1A]' : 'bg-[#f4f4f0]')}>
+                  <p className={cn('font-medium', isDarkMode ? 'text-white/70' : 'text-black/60')}>
+                    ¿Ya tenías una cuenta y olvidaste tu contraseña?
+                  </p>
+                  <button
+                    type="button"
+                    onClick={handleResetPassword}
+                    disabled={loading}
+                    className="font-bold text-[#B8860B] hover:underline disabled:opacity-50"
+                  >
+                    Enviar correo para restablecer contraseña →
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+
+          <button
             type="submit"
             disabled={loading}
             className="w-full h-16 bg-gradient-to-r from-[#B8860B] to-[#FFD700] text-black rounded-2xl font-bold text-lg flex items-center justify-center gap-3 shadow-xl active:scale-[0.98] transition-all disabled:opacity-50 mt-8"
@@ -359,9 +407,19 @@ export const Auth = ({ isDarkMode }: AuthProps) => {
         <div className="mt-8 space-y-4 text-center">
           {isLogin ? (
             <>
+              {email && (
+                <button
+                  type="button"
+                  onClick={handleResetPassword}
+                  disabled={loading}
+                  className={cn('text-sm disabled:opacity-50', isDarkMode ? 'text-white/40 hover:text-white/70' : 'text-black/40 hover:text-black/60')}
+                >
+                  ¿Olvidaste tu contraseña?
+                </button>
+              )}
               <p className="opacity-60 font-medium">¿No tienes cuenta?</p>
               <button
-                onClick={() => { setIsLogin(false); setNoEmail(false); setConfirmPassword(''); setShowPassword(false); setShowConfirmPassword(false); }}
+                onClick={() => { setIsLogin(false); setNoEmail(false); setConfirmPassword(''); setShowPassword(false); setShowConfirmPassword(false); setResetSent(false); setError(''); }}
                 className="text-[#B8860B] font-bold hover:underline"
               >
                 Crear Cuenta

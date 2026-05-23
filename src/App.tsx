@@ -121,12 +121,18 @@ export default function App() {
       <AnimatePresence mode="wait">
         {activeTab === 'inicio' && (
           <motion.div key="dashboard" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }}>
-            <Dashboard isDarkMode={isDarkMode} userId={user.uid} sales={sales} expenses={expenses} />
+            <Dashboard isDarkMode={isDarkMode} userId={user.uid} sales={sales} expenses={expenses} inventory={inventory} debts={debts} onNavigate={setActiveTab} />
           </motion.div>
         )}
         {activeTab === 'finanzas' && (
           <motion.div key="finanzas" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }}>
-            <FinanceView isDarkMode={isDarkMode} sales={sales} expenses={expenses} />
+            <FinanceView
+              isDarkMode={isDarkMode}
+              sales={sales}
+              expenses={expenses}
+              userId={user.uid}
+              userName={profile?.firstName}
+            />
           </motion.div>
         )}
         {activeTab === 'camara' && (
@@ -150,6 +156,10 @@ export default function App() {
               isDarkMode={isDarkMode}
               profile={profile}
               onUpdate={(updated) => setProfile({ ...profile, ...updated })}
+              sales={sales}
+              expenses={expenses}
+              debts={debts}
+              onNavigate={setActiveTab}
             />
           </motion.div>
         )}

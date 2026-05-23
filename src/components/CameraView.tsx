@@ -19,6 +19,9 @@ import {
   Check,
   Lightbulb,
   Clock,
+  MoreVertical,
+  Search,
+  SlidersHorizontal,
 } from 'lucide-react';
 import { collection, addDoc, serverTimestamp, doc, updateDoc, Timestamp } from 'firebase/firestore';
 import { db } from '../firebase';
@@ -84,10 +87,23 @@ function calcStockTotal(row: StockEditRow): number {
   return parseNum(row.cantidadComprada) * parseNum(row.precioCompra);
 }
 
-// ─── Debt helpers (kept from original) ──────────────────────────────────────
+// ─── Debt helpers ────────────────────────────────────────────────────────────
 
 function getDebtDate(debt: Debt): Date {
   return debt.createdAt?.toDate ? debt.createdAt.toDate() : new Date();
+}
+function getInitials(name: string): string {
+  const parts = name.trim().split(/\s+/);
+  if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
+  return name.slice(0, 2).toUpperCase();
+}
+function formatDebtDateTime(date: Date): string {
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const d = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  const t = date.toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit' });
+  if (d.getTime() === today.getTime()) return `Hoy, ${t}`;
+  return date.toLocaleDateString('es-CO', { day: '2-digit', month: 'short' }) + ', ' + t;
 }
 function formatRelativeDate(date: Date): string {
   const now = new Date();
@@ -169,6 +185,10 @@ export const CameraView = ({ isDarkMode, debts, userId, inventory }: Props) => {
   const [showHistory, setShowHistory] = useState(false);
   const [selectedDebt, setSelectedDebt] = useState<Debt | null>(null);
   const [payingDebtId, setPayingDebtId] = useState<string | null>(null);
+
+  // Desktop debts
+  const [debtSearchQuery, setDebtSearchQuery] = useState('');
+  const [openDropdownId, setOpenDropdownId] = useState<string | null>(null);
 
   // Toast flotante
   const [toast, setToast] = useState<string | null>(null);
@@ -516,7 +536,7 @@ export const CameraView = ({ isDarkMode, debts, userId, inventory }: Props) => {
       {/* Viewfinder */}
       <div
         className={cn(
-          'relative overflow-hidden rounded-[2rem] aspect-[4/3] flex flex-col items-center justify-center gap-5 cursor-pointer border-2 border-dashed transition-all',
+          'relative overflow-hidden rounded-[2rem] aspect-[4/3] md:aspect-auto md:h-48 flex flex-col items-center justify-center gap-5 cursor-pointer border-2 border-dashed transition-all',
           isDarkMode ? 'bg-[#1A1A1A] border-[#B8860B]/30' : 'bg-[#FDFBF0] border-[#B8860B]/20',
         )}
         onClick={() => galleryRef.current?.click()}
@@ -799,7 +819,7 @@ export const CameraView = ({ isDarkMode, debts, userId, inventory }: Props) => {
           className={cn('w-full h-14 rounded-2xl font-black text-base flex items-center justify-center gap-3 transition-all duration-300',
             isSaving ? isDarkMode ? 'bg-white/10 text-white/40' : 'bg-black/10 text-black/30'
               : ventasRows.some((r) => r.nombre.trim()) ? 'bg-gradient-to-r from-[#B8860B] to-[#FFD700] text-black shadow-lg active:scale-[0.98]'
-              : isDarkMode ? 'bg-white/8 text-white/25 cursor-not-allowed' : 'bg-black/8 text-black/25 cursor-not-allowed')}>
+                : isDarkMode ? 'bg-white/8 text-white/25 cursor-not-allowed' : 'bg-black/8 text-black/25 cursor-not-allowed')}>
           {isSaving ? <><Loader2 className="w-5 h-5 animate-spin" /> Guardando...</> : <><CheckCircle2 className="w-5 h-5" /> Confirmar ventas</>}
         </button>
       </div>
@@ -895,7 +915,7 @@ export const CameraView = ({ isDarkMode, debts, userId, inventory }: Props) => {
           className={cn('w-full h-14 rounded-2xl font-black text-base flex items-center justify-center gap-3 transition-all duration-300',
             isSaving ? isDarkMode ? 'bg-white/10 text-white/40' : 'bg-black/10 text-black/30'
               : stockRows.some((r) => r.nombre.trim()) ? 'bg-gradient-to-r from-[#B8860B] to-[#FFD700] text-black shadow-lg active:scale-[0.98]'
-              : isDarkMode ? 'bg-white/8 text-white/25 cursor-not-allowed' : 'bg-black/8 text-black/25 cursor-not-allowed')}>
+                : isDarkMode ? 'bg-white/8 text-white/25 cursor-not-allowed' : 'bg-black/8 text-black/25 cursor-not-allowed')}>
           {isSaving ? <><Loader2 className="w-5 h-5 animate-spin" /> Guardando...</> : <><TrendingDown className="w-5 h-5" /> Confirmar compra</>}
         </button>
       </div>
@@ -1464,28 +1484,345 @@ export const CameraView = ({ isDarkMode, debts, userId, inventory }: Props) => {
 
 
   // ─────────────────────────────────────────────────────────────────────────
+  // DESKTOP DEBTS TABLE
+  // ─────────────────────────────────────────────────────────────────────────
+
+  const renderDesktopDeudasSection = () => {
+    const displayedDebts = (() => {
+      let list: Debt[];
+      if (showHistory) {
+        list = debts.filter(d => (d.status ?? 'pendiente') === 'pagada');
+      } else {
+        list = debts.filter(d => d.type === debtType && (d.status ?? 'pendiente') !== 'pagada');
+      }
+      if (debtSearchQuery.trim()) {
+        const q = debtSearchQuery.toLowerCase();
+        list = list.filter(d => d.name.toLowerCase().includes(q));
+      }
+      return [...list].sort((a, b) => getDebtDate(b).getTime() - getDebtDate(a).getTime());
+    })();
+
+    const activeTotal = showHistory
+      ? displayedDebts.reduce((s, d) => s + (d.amount - (d.amountPaid ?? 0)), 0)
+      : debtType === 'me-deben' ? totalMeDeben : totalDebo;
+    const avgDebt = displayedDebts.length > 0 ? Math.round(activeTotal / displayedDebts.length) : 0;
+
+    const meDebenCount = debts.filter(d => d.type === 'me-deben' && (d.status ?? 'pendiente') !== 'pagada').length;
+    const deboCount = debts.filter(d => d.type === 'debo' && (d.status ?? 'pendiente') !== 'pagada').length;
+
+    const isFrequent = (name: string) =>
+      debts.filter(d => d.name.toLowerCase().trim() === name.toLowerCase().trim()).length > 2;
+
+    const muted = isDarkMode ? 'text-white/40' : 'text-[#5b5c5a]/60';
+    const cardBg = isDarkMode ? 'bg-[#1A1A1A]' : 'bg-white shadow-sm';
+
+    const tabs = [
+      { label: '↗ Me deben', key: 'me-deben', active: !showHistory && debtType === 'me-deben' },
+      { label: '↙ Debo', key: 'debo', active: !showHistory && debtType === 'debo' },
+      { label: '🕐 Historial', key: 'historial', active: showHistory },
+    ];
+
+    return (
+      <div className="space-y-6">
+        {/* Header */}
+        <div className="flex items-center justify-between">
+          <h2 className="text-2xl font-black">Deudas y Fiados</h2>
+          <button
+            onClick={() => { setShowDebtForm(v => !v); setDebtFormNombre(''); setDebtFormMonto(''); setDebtFormFecha(new Date().toISOString().split('T')[0]); }}
+            className={cn(
+              'flex items-center gap-2 px-5 py-2.5 rounded-xl font-bold text-sm transition-all active:scale-[0.98]',
+              showDebtForm ? 'bg-red-500 text-white' : 'bg-[#B8860B] text-white'
+            )}
+          >
+            {showDebtForm ? <X className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
+            {showDebtForm ? 'Cancelar' : ' Agregar deuda o fiado'}
+          </button>
+        </div>
+
+        {/* Inline add form */}
+        {showDebtForm && (
+          <div className={cn('p-6 rounded-2xl border', isDarkMode ? 'bg-[#1A1A1A] border-white/8' : 'bg-white shadow-sm border-black/5')}>
+            <p className={cn('font-black text-[#B8860B] text-sm uppercase tracking-widest mb-4')}>
+              {debtType === 'me-deben' ? 'Nueva deuda a cobrar' : 'Nueva deuda a pagar'}
+            </p>
+            <div className="grid grid-cols-3 gap-4">
+              <input
+                type="text"
+                value={debtFormNombre}
+                onChange={(e) => setDebtFormNombre(e.target.value)}
+                placeholder={debtType === 'me-deben' ? 'Nombre de la persona' : 'Persona o proveedor'}
+                className={cn('h-11 rounded-xl px-4 text-sm outline-none border', isDarkMode ? 'bg-[#2A2A2A] border-white/8 text-[#FDFBF0] placeholder:text-white/30' : 'bg-[#FDFBF0] border-black/8 placeholder:text-black/30')}
+                onClick={(e) => e.stopPropagation()}
+              />
+              <div className="relative">
+                <span className={cn('absolute left-3 top-1/2 -translate-y-1/2 text-sm select-none', isDarkMode ? 'text-white/30' : 'text-black/30')}>$</span>
+                <input
+                  type="number"
+                  min="0"
+                  value={debtFormMonto}
+                  onChange={(e) => setDebtFormMonto(e.target.value)}
+                  placeholder="Monto"
+                  className={cn('w-full h-11 rounded-xl pl-7 pr-4 text-sm outline-none border', isDarkMode ? 'bg-[#2A2A2A] border-white/8 text-[#FDFBF0] placeholder:text-white/30' : 'bg-[#FDFBF0] border-black/8 placeholder:text-black/30')}
+                  onClick={(e) => e.stopPropagation()}
+                />
+              </div>
+              <div className="flex gap-2">
+                <input
+                  type="date"
+                  value={debtFormFecha}
+                  onChange={(e) => setDebtFormFecha(e.target.value)}
+                  className={cn('flex-1 h-11 rounded-xl px-3 text-sm outline-none border', isDarkMode ? 'bg-[#2A2A2A] border-white/8 text-[#FDFBF0]' : 'bg-[#FDFBF0] border-black/8')}
+                  onClick={(e) => e.stopPropagation()}
+                />
+                <button
+                  onClick={(e) => { e.stopPropagation(); handleSaveDebtManual(); }}
+                  disabled={savingDebt || !debtFormNombre.trim() || !esMontoValido(parseNum(debtFormMonto))}
+                  className={cn('px-5 h-11 rounded-xl font-black text-sm flex items-center gap-2 transition-all whitespace-nowrap',
+                    savingDebt || !debtFormNombre.trim() || !esMontoValido(parseNum(debtFormMonto))
+                      ? isDarkMode ? 'bg-white/8 text-white/25 cursor-not-allowed' : 'bg-black/8 text-black/25 cursor-not-allowed'
+                      : 'bg-[#B8860B] text-white active:scale-[0.98]'
+                  )}
+                >
+                  {savingDebt ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
+                  Guardar
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Summary cards */}
+        <div className="grid grid-cols-2 gap-4">
+          <div className={cn('p-6 rounded-2xl border-b-4 border-green-400', cardBg)}>
+            <div className="flex items-center justify-between">
+              <div>
+                <p className={cn('text-xs font-bold uppercase tracking-widest mb-2', muted)}>Me deben</p>
+                <p className="text-3xl font-black text-green-600">${totalMeDeben.toLocaleString('es-CO')}</p>
+                <p className={cn('text-xs mt-1', muted)}>{meDebenCount} {meDebenCount === 1 ? 'persona' : 'personas'}</p>
+              </div>
+              <div className="w-12 h-12 rounded-full bg-green-500/15 flex items-center justify-center">
+                <ArrowUpRight className="w-6 h-6 text-green-600" />
+              </div>
+            </div>
+          </div>
+          <div className={cn('p-6 rounded-2xl border-b-4 border-red-400', cardBg)}>
+            <div className="flex items-center justify-between">
+              <div>
+                <p className={cn('text-xs font-bold uppercase tracking-widest mb-2', muted)}>Debo</p>
+                <p className="text-3xl font-black text-red-500">${totalDebo.toLocaleString('es-CO')}</p>
+                <p className={cn('text-xs mt-1', muted)}>{deboCount} {deboCount === 1 ? 'persona' : 'personas'}</p>
+              </div>
+              <div className="w-12 h-12 rounded-full bg-red-500/15 flex items-center justify-center">
+                <ArrowDownRight className="w-6 h-6 text-red-500" />
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Tabs + search */}
+        <div className="flex items-center justify-between gap-4">
+          <div className={cn('flex items-center rounded-xl border overflow-hidden', isDarkMode ? 'border-white/10' : 'border-gray-200')}>
+            {tabs.map((tab, i) => (
+              <button
+                key={tab.key}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (tab.key === 'historial') { setShowHistory(true); setShowDebtForm(false); }
+                  else { setDebtType(tab.key as 'me-deben' | 'debo'); setShowHistory(false); setShowDebtForm(false); }
+                  setOpenDropdownId(null);
+                }}
+                className={cn(
+                  'px-4 py-2.5 text-sm font-bold transition-all whitespace-nowrap',
+                  i > 0 && (isDarkMode ? 'border-l border-white/10' : 'border-l border-gray-200'),
+                  tab.active
+                    ? 'text-[#B8860B] bg-[#B8860B]/10'
+                    : isDarkMode ? 'text-white/50 hover:text-white/80' : 'text-[#5b5c5a]/60 hover:text-[#5b5c5a]'
+                )}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
+          <div className="flex items-center gap-2">
+            <div className={cn('flex items-center gap-2 px-3 h-10 rounded-xl border', isDarkMode ? 'bg-[#1A1A1A] border-white/10' : 'bg-white border-gray-200')} onClick={(e) => e.stopPropagation()}>
+              <Search className={cn('w-4 h-4 flex-shrink-0', isDarkMode ? 'text-white/30' : 'text-gray-400')} />
+              <input
+                type="text"
+                value={debtSearchQuery}
+                onChange={(e) => setDebtSearchQuery(e.target.value)}
+                placeholder="Buscar persona..."
+                className={cn('bg-transparent outline-none w-40 text-sm', isDarkMode ? 'text-[#FDFBF0] placeholder:text-white/30' : 'text-[#2e2f2d] placeholder:text-gray-400')}
+              />
+            </div>
+            <button className={cn('h-10 px-3 rounded-xl border text-sm font-medium flex items-center gap-1.5 transition-colors', isDarkMode ? 'border-white/10 text-white/50 hover:text-white/80' : 'border-gray-200 text-[#5b5c5a]/60 hover:text-[#5b5c5a]')}>
+              <SlidersHorizontal className="w-4 h-4" /> Filtrar
+            </button>
+          </div>
+        </div>
+
+        {/* Table card */}
+        <div className={cn('rounded-2xl overflow-hidden', isDarkMode ? 'bg-[#1A1A1A]' : 'bg-white shadow-sm')}>
+          {displayedDebts.length === 0 ? (
+            <div className="py-16 flex flex-col items-center justify-center gap-3 text-center">
+              <div className={cn('w-14 h-14 rounded-full flex items-center justify-center', isDarkMode ? 'bg-[#2A2A2A]' : 'bg-[#f1f1ee]')}>
+                <Users className={cn('w-7 h-7', isDarkMode ? 'text-white/20' : 'text-gray-300')} />
+              </div>
+              <p className={cn('font-bold', muted)}>
+                {showHistory ? 'Sin historial aún' : debtType === 'me-deben' ? 'Nadie te debe por ahora' : 'No tienes deudas registradas'}
+              </p>
+            </div>
+          ) : (
+            <>
+              <div className="overflow-x-auto">
+                <table className="w-full">
+                  <thead>
+                    <tr className={cn('border-b text-xs font-bold uppercase tracking-wider', isDarkMode ? 'border-white/5 text-white/30' : 'border-gray-100 text-[#5b5c5a]/50')}>
+                      <th className="px-6 py-3 text-left">Persona</th>
+                      <th className="px-6 py-3 text-left">Fecha</th>
+                      <th className="px-6 py-3 text-left">Total adeudado</th>
+                      <th className="px-6 py-3 text-left">Estado</th>
+                      <th className="px-4 py-3 w-12" />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {displayedDebts.map((debt, idx) => {
+                      const pending = debt.amount - (debt.amountPaid ?? 0);
+                      const isMeDeben = debt.type === 'me-deben';
+                      const freq = isFrequent(debt.name);
+                      const date = getDebtDate(debt);
+                      const isLast = idx === displayedDebts.length - 1;
+                      return (
+                        <tr
+                          key={debt.id}
+                          className={cn('border-b transition-colors', isLast && 'border-b-0', isDarkMode ? 'border-white/5 hover:bg-white/3' : 'border-gray-50 hover:bg-[#FDFBF0]')}
+                        >
+                          {/* Persona */}
+                          <td className="px-6 py-4">
+                            <div className="flex items-center gap-3">
+                              <div className="w-9 h-9 rounded-full bg-[#B8860B] flex items-center justify-center flex-shrink-0">
+                                <span className="text-black text-xs font-black">{getInitials(debt.name)}</span>
+                              </div>
+                              <div>
+                                <p className="font-bold text-sm">{debt.name}</p>
+                                <p className={cn('text-[10px]', muted)}>
+                                  {freq ? '⭐ Cliente frecuente' : 'Cliente nuevo'}
+                                </p>
+                              </div>
+                            </div>
+                          </td>
+                          {/* Fecha */}
+                          <td className="px-6 py-4">
+                            <p className={cn('text-sm', isDarkMode ? 'text-white/60' : 'text-[#5b5c5a]')}>
+                              {formatDebtDateTime(date)}
+                            </p>
+                          </td>
+                          {/* Total */}
+                          <td className="px-6 py-4">
+                            <p className={cn('text-sm font-black', isMeDeben ? 'text-green-600' : 'text-red-500')}>
+                              {isMeDeben ? '+' : '-'}${pending.toLocaleString('es-CO')}
+                            </p>
+                          </td>
+                          {/* Estado */}
+                          <td className="px-6 py-4">
+                            {showHistory ? (
+                              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-green-50 text-green-700">
+                                <span className="w-1.5 h-1.5 rounded-full bg-green-500 inline-block" /> Al día
+                              </span>
+                            ) : (
+                              <span className={cn('inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold', isDarkMode ? 'bg-[#B8860B]/20 text-[#FFD700]' : 'bg-amber-50 text-amber-700')}>
+                                <span className={cn('w-1.5 h-1.5 rounded-full inline-block', isDarkMode ? 'bg-[#FFD700]' : 'bg-amber-500')} /> Pendiente
+                              </span>
+                            )}
+                          </td>
+                          {/* Acciones ⋮ */}
+                          <td className="px-4 py-4 text-right">
+                            {!showHistory && (
+                              <div className="relative inline-block" onClick={(e) => e.stopPropagation()}>
+                                <button
+                                  onClick={() => setOpenDropdownId(openDropdownId === debt.id ? null : debt.id)}
+                                  className={cn('w-8 h-8 rounded-lg flex items-center justify-center transition-colors', isDarkMode ? 'hover:bg-white/10 text-white/40' : 'hover:bg-gray-100 text-gray-400')}
+                                >
+                                  <MoreVertical className="w-4 h-4" />
+                                </button>
+                                {openDropdownId === debt.id && (
+                                  <div className={cn('absolute right-0 top-9 z-30 rounded-xl shadow-xl border py-1 min-w-[170px]', isDarkMode ? 'bg-[#1A1A1A] border-white/10' : 'bg-white border-gray-100')}>
+                                    <button
+                                      onClick={() => { handleMarkPaid(debt); setOpenDropdownId(null); }}
+                                      disabled={!!payingDebtId}
+                                      className={cn('w-full px-4 py-2.5 text-left text-sm font-medium flex items-center gap-2 transition-colors', isDarkMode ? 'hover:bg-white/5 text-[#FDFBF0]' : 'hover:bg-gray-50 text-[#2e2f2d]')}
+                                    >
+                                      {payingDebtId === debt.id
+                                        ? <Loader2 className="w-4 h-4 animate-spin text-green-500" />
+                                        : <CheckCircle2 className="w-4 h-4 text-green-500" />}
+                                      {isMeDeben ? 'Pago recibido' : 'Pago realizado'}
+                                    </button>
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Footer */}
+              <div className={cn('flex items-center justify-between px-6 py-4 border-t', isDarkMode ? 'border-white/5' : 'border-gray-100')}>
+                <div>
+                  <p className={cn('text-[10px] font-bold uppercase tracking-widest', muted)}>
+                    {showHistory ? 'Total pagado' : debtType === 'me-deben' ? 'Total por cobrar' : 'Total que debo'}
+                  </p>
+                  <p className={cn('text-lg font-black mt-0.5', !showHistory && debtType === 'me-deben' ? 'text-green-600' : !showHistory ? 'text-red-500' : isDarkMode ? 'text-white' : 'text-[#2e2f2d]')}>
+                    ${activeTotal.toLocaleString('es-CO')}
+                  </p>
+                </div>
+                <div>
+                  <p className={cn('text-[10px] font-bold uppercase tracking-widest', muted)}>Promedio de deuda</p>
+                  <p className={cn('text-lg font-black mt-0.5', isDarkMode ? 'text-white' : 'text-[#2e2f2d]')}>
+                    ${avgDebt.toLocaleString('es-CO')}
+                  </p>
+                </div>
+                <button className="flex items-center gap-2 text-sm font-bold text-[#B8860B] hover:opacity-80 transition-opacity">
+                  📊 Ver reporte <ChevronRight className="w-4 h-4" />
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  // ─────────────────────────────────────────────────────────────────────────
   // MAIN RENDER
   // ─────────────────────────────────────────────────────────────────────────
 
   return (
-    <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
+    <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
       {/* Hidden file inputs */}
       <input ref={galleryRef} type="file" accept="image/*" onChange={onFileChange} className="hidden" />
       {/* eslint-disable-next-line @typescript-eslint/ban-ts-comment */}
       {/* @ts-ignore — capture="environment" is valid HTML but TS types vary */}
       <input ref={cameraRef} type="file" accept="image/*" capture="environment" onChange={onFileChange} className="hidden" />
 
-      {/* OCR Flow */}
-      {step === 'idle' && renderUpload()}
-      {step === 'mode-select' && renderModeSelect()}
-      {step === 'analyzing' && renderAnalyzing()}
-      {(step === 'table' || step === 'saving') && ocrMode === 'ventas-dia' && renderVentasTable()}
-      {(step === 'table' || step === 'saving') && ocrMode === 'nuevo-stock' && renderStockTable()}
-      {(step === 'table' || step === 'saving') && (ocrMode === 'fiados-me-deben' || ocrMode === 'fiados-debo') && renderFiadosTable()}
-      {step === 'success' && renderSuccess()}
+      {/* ── Mobile layout ── */}
+      <div className="md:hidden space-y-8 max-w-2xl mx-auto">
+        {step === 'idle' && renderUpload()}
+        {step === 'mode-select' && renderModeSelect()}
+        {step === 'analyzing' && renderAnalyzing()}
+        {(step === 'table' || step === 'saving') && ocrMode === 'ventas-dia' && renderVentasTable()}
+        {(step === 'table' || step === 'saving') && ocrMode === 'nuevo-stock' && renderStockTable()}
+        {(step === 'table' || step === 'saving') && (ocrMode === 'fiados-me-deben' || ocrMode === 'fiados-debo') && renderFiadosTable()}
+        {step === 'success' && renderSuccess()}
+        {step === 'idle' && renderDeudasSection()}
+      </div>
 
-      {/* Deudas section — always visible on idle */}
-      {step === 'idle' && renderDeudasSection()}
+      {/* ── Desktop layout ── */}
+      <div className="hidden md:block" onClick={() => setOpenDropdownId(null)}>
+        {renderDesktopDeudasSection()}
+      </div>
 
       {/* Toast flotante */}
       {toast && (

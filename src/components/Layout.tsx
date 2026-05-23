@@ -10,7 +10,13 @@ import {
   HelpCircle,
   MessageSquare,
   Users,
+  MessageCircle,
+  Bell,
+  LogOut,
+  X,
 } from 'lucide-react';
+import { signOut } from 'firebase/auth';
+import { auth } from '../firebase';
 import { cn } from '../lib/utils';
 import { Tab, Debt, InventoryProduct } from '../types';
 import { ChatBubble } from './ChatBubble';
@@ -49,11 +55,11 @@ export const Layout = ({
 }: LayoutProps) => {
   const [showManual, setShowManual] = React.useState(false);
   const [showSuggestions, setShowSuggestions] = React.useState(false);
+  const [showNotifications, setShowNotifications] = React.useState(false);
+  const [showLogoutConfirm, setShowLogoutConfirm] = React.useState(false);
 
-  // Derive a clean name from "Hola, Juan" → "Juan"
   const cleanName = userName.startsWith('Hola, ') ? userName.replace('Hola, ', '') : userName;
 
-  // Auto-show manual on first visit (using localStorage)
   React.useEffect(() => {
     const hasSeenManual = localStorage.getItem('hasSeenManual');
     if (!hasSeenManual) {
@@ -62,19 +68,25 @@ export const Layout = ({
     }
   }, []);
 
+  const navItems: { tab: Tab; icon: React.ReactNode; label: string }[] = [
+    { tab: 'inicio',     icon: <Home />,      label: 'Inicio' },
+    { tab: 'finanzas',   icon: <TrendingUp />, label: 'Finanzas' },
+    { tab: 'camara',     icon: <Users />,      label: 'Deudas' },
+    { tab: 'inventario', icon: <Package />,    label: 'Inventario' },
+    { tab: 'pasaporte',  icon: <Wallet />,     label: 'Pasaporte' },
+  ];
+
   return (
     <div className={cn(
-      "min-h-screen font-['Be_Vietnam_Pro'] pb-32 transition-colors duration-500",
+      "min-h-screen overflow-x-hidden font-['Be_Vietnam_Pro'] pb-32 md:pb-0 transition-colors duration-500",
       isDarkMode ? "bg-[#0D0D0D] text-[#FDFBF0]" : "bg-[#FDFBF0] text-[#2e2f2d]"
     )}>
-      {/* Onboarding Manual */}
       <OnboardingManual
         isOpen={showManual}
         onClose={() => setShowManual(false)}
         isDarkMode={isDarkMode}
       />
 
-      {/* Suggestions / PQRS Modal */}
       {showSuggestions && (
         <SuggestionsModal
           isDarkMode={isDarkMode}
@@ -83,13 +95,149 @@ export const Layout = ({
         />
       )}
 
-      {/* Top Bar */}
-      <header className={cn(
-        "fixed top-0 left-0 w-full z-50 backdrop-blur-xl flex justify-between items-center px-6 py-4 transition-colors duration-500",
-        isDarkMode ? "bg-[#0D0D0D]/85" : "bg-[#FDFBF0]/85"
+      {showLogoutConfirm && (
+        <div className="fixed inset-0 z-[200] flex items-center justify-center p-6">
+          <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={() => setShowLogoutConfirm(false)} />
+          <div className={cn(
+            'relative w-full max-w-sm rounded-2xl shadow-2xl overflow-hidden z-10',
+            isDarkMode ? 'bg-[#1A1A1A] text-[#FDFBF0]' : 'bg-white text-[#2e2f2d]'
+          )}>
+            <div className="h-1 w-full bg-gradient-to-r from-[#B8860B] to-[#FFD700]" />
+            <div className="px-6 py-6 space-y-4">
+              <div className="flex items-center gap-3">
+                <div className={cn('w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0', isDarkMode ? 'bg-white/8' : 'bg-black/5')}>
+                  <LogOut className="w-5 h-5 text-[#B8860B]" />
+                </div>
+                <div>
+                  <p className="font-black text-base">¿Cerrar sesión?</p>
+                  <p className={cn('text-xs', isDarkMode ? 'text-white/50' : 'text-black/40')}>Tendrás que volver a iniciar sesión</p>
+                </div>
+              </div>
+              <div className="flex gap-3 pt-1">
+                <button
+                  onClick={() => setShowLogoutConfirm(false)}
+                  className={cn(
+                    'flex-1 h-11 rounded-xl font-bold text-sm transition-colors',
+                    isDarkMode ? 'bg-white/8 hover:bg-white/12 text-white/70' : 'bg-black/5 hover:bg-black/10 text-black/60'
+                  )}
+                >
+                  Cancelar
+                </button>
+                <button
+                  onClick={() => { setShowLogoutConfirm(false); signOut(auth); }}
+                  className="flex-1 h-11 rounded-xl font-black text-sm bg-gradient-to-r from-[#B8860B] to-[#FFD700] text-black shadow-md hover:opacity-90 transition-opacity"
+                >
+                  Cerrar sesión
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Desktop sidebar ── */}
+      <aside className={cn(
+        'hidden md:flex flex-col fixed left-0 top-0 h-screen w-60 z-50 border-r overflow-hidden transition-colors duration-500',
+        isDarkMode ? 'bg-[#0D0D0D] border-white/5' : 'bg-white border-black/5'
       )}>
-        {/* Izquierda: avatar + saludo */}
-        <div className="flex items-center gap-3">
+        {/* Logo */}
+        <div className={cn(
+          'flex items-center gap-3 px-5 py-5 border-b',
+          isDarkMode ? 'border-white/5' : 'border-black/5'
+        )}>
+          <img src="/logoapp.png" alt="Voz-Activa" className="w-9 h-9 object-contain" />
+          <span className="font-['Plus_Jakarta_Sans'] font-black text-lg text-[#B8860B]">Voz-Activa</span>
+        </div>
+
+        {/* User info */}
+        <div className={cn(
+          'flex items-center gap-3 px-5 py-4 border-b',
+          isDarkMode ? 'border-white/5' : 'border-black/5'
+        )}>
+          <div className="w-9 h-9 rounded-full overflow-hidden border-2 border-[#D4AF37] flex-shrink-0">
+            <Avatar
+              photoURL={profilePhotoURL}
+              firstName={profileFirstName}
+              lastName={profileLastName}
+              size="sm"
+              isDarkMode={isDarkMode}
+            />
+          </div>
+          <div className="min-w-0">
+            <p className="font-bold text-sm truncate text-[#B8860B]">{cleanName}</p>
+            <p className={cn('text-[10px] truncate', isDarkMode ? 'text-white/40' : 'text-black/40')}>
+              Vendedor activo
+            </p>
+          </div>
+        </div>
+
+        {/* Nav items */}
+        <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
+          {navItems.map(({ tab, icon, label }) => (
+            <React.Fragment key={tab}>
+              <SidebarButton
+                active={activeTab === tab}
+                onClick={() => setActiveTab(tab)}
+                icon={icon}
+                label={label}
+                isDarkMode={isDarkMode}
+              />
+            </React.Fragment>
+          ))}
+          <SidebarButton
+            active={activeTab === 'perfil'}
+            onClick={() => setActiveTab('perfil')}
+            icon={<User />}
+            label="Perfil"
+            isDarkMode={isDarkMode}
+          />
+        </nav>
+
+        {/* Bottom actions */}
+        <div className={cn(
+          'px-3 py-4 border-t space-y-1',
+          isDarkMode ? 'border-white/5' : 'border-black/5'
+        )}>
+          <button
+            onClick={() => setShowSuggestions(true)}
+            className={cn(
+              'w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-colors',
+              isDarkMode ? 'text-white/50 hover:bg-white/5 hover:text-white/80' : 'text-black/50 hover:bg-black/5 hover:text-black/80'
+            )}
+          >
+            <MessageSquare className="w-4 h-4" />
+            Sugerencias
+          </button>
+          <button
+            onClick={() => setShowManual(true)}
+            className={cn(
+              'w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-colors',
+              isDarkMode ? 'text-white/50 hover:bg-white/5 hover:text-white/80' : 'text-black/50 hover:bg-black/5 hover:text-black/80'
+            )}
+          >
+            <HelpCircle className="w-4 h-4" />
+            Ayuda
+          </button>
+          <button
+            onClick={toggleDarkMode}
+            className={cn(
+              'w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-colors',
+              isDarkMode ? 'text-white/50 hover:bg-white/5 hover:text-white/80' : 'text-black/50 hover:bg-black/5 hover:text-black/80'
+            )}
+          >
+            {isDarkMode ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+            {isDarkMode ? 'Modo claro' : 'Modo oscuro'}
+          </button>
+        </div>
+      </aside>
+
+      {/* ── Top Bar ── */}
+      <header className={cn(
+        'fixed top-0 left-0 md:left-60 right-0 z-50 backdrop-blur-xl flex justify-between items-center px-6 py-4 transition-colors duration-500',
+        isDarkMode ? 'bg-[#0D0D0D]/85' : 'bg-[#FDFBF0]/85'
+      )}>
+        {/* Left: avatar + greeting (mobile only — desktop shows in sidebar) */}
+        <div className="flex items-center gap-3 md:hidden">
           <div className="w-10 h-10 rounded-full overflow-hidden border-2 border-[#D4AF37] flex-shrink-0">
             <Avatar
               photoURL={profilePhotoURL}
@@ -104,13 +252,90 @@ export const Layout = ({
           </h1>
         </div>
 
-        {/* Derecha: mensajes, ayuda, luna/sol, logo, perfil */}
+        {/* Left: page title on desktop */}
+        <div className="hidden md:block">
+          <h1 className="font-['Plus_Jakarta_Sans'] font-bold text-xl tracking-tight text-[#B8860B]">
+            {userName}
+          </h1>
+          {activeTab === 'finanzas' && (
+            <p className="text-sm text-gray-400 mt-0.5">Resumen de tus finanzas</p>
+          )}
+        </div>
+
+        {/* Right: action buttons */}
         <div className="flex items-center gap-1">
+          {/* Desktop-only icons */}
+          <div className="hidden md:flex items-center gap-3 mr-2">
+            <button onClick={() => setShowSuggestions(true)} className="w-5 h-5 text-gray-400 hover:text-gray-600 cursor-pointer transition-colors">
+              <MessageCircle className="w-5 h-5" />
+            </button>
+            <button onClick={() => setShowManual(true)} className="w-5 h-5 text-gray-400 hover:text-gray-600 cursor-pointer transition-colors">
+              <HelpCircle className="w-5 h-5" />
+            </button>
+            <div className="relative">
+              <button
+                onClick={() => setShowNotifications(v => !v)}
+                className="relative text-gray-400 hover:text-gray-600 cursor-pointer transition-colors"
+                title="Notificaciones"
+              >
+                <Bell className="w-5 h-5" />
+                {(debts.filter(d => d.status !== 'pagada').length > 0 || inventory.filter(p => (p.cantidad ?? 0) < 5).length > 0) && (
+                  <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-[#B8860B]" />
+                )}
+              </button>
+              {showNotifications && (
+                <div
+                  className={cn(
+                    'absolute right-0 top-8 w-72 rounded-2xl shadow-2xl border z-50 overflow-hidden',
+                    isDarkMode ? 'bg-[#1A1A1A] border-white/10' : 'bg-white border-black/5'
+                  )}
+                  onClick={e => e.stopPropagation()}
+                >
+                  <div className={cn('flex items-center justify-between px-4 py-3 border-b', isDarkMode ? 'border-white/8' : 'border-black/5')}>
+                    <p className="font-bold text-sm">Notificaciones</p>
+                    <button onClick={() => setShowNotifications(false)} className="opacity-40 hover:opacity-70 transition-opacity">
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+                  <div className="max-h-64 overflow-y-auto">
+                    {debts.filter(d => d.status !== 'pagada').slice(0, 3).map(d => (
+                      <div key={d.id} className={cn('flex items-start gap-3 px-4 py-3 border-b', isDarkMode ? 'border-white/5' : 'border-black/3')}>
+                        <span className="text-lg flex-shrink-0">💰</span>
+                        <div className="min-w-0">
+                          <p className="text-xs font-bold truncate">{d.name}</p>
+                          <p className={cn('text-[11px]', isDarkMode ? 'text-white/50' : 'text-black/50')}>
+                            {d.type === 'me-deben' ? 'Te debe' : 'Debes'} ${(d.amount - (d.amountPaid ?? 0)).toLocaleString('es-CO')}
+                          </p>
+                        </div>
+                      </div>
+                    ))}
+                    {inventory.filter(p => (p.cantidad ?? 0) < 5).slice(0, 3).map(p => (
+                      <div key={p.id} className={cn('flex items-start gap-3 px-4 py-3 border-b', isDarkMode ? 'border-white/5' : 'border-black/3')}>
+                        <span className="text-lg flex-shrink-0">📦</span>
+                        <div className="min-w-0">
+                          <p className="text-xs font-bold truncate">{p.nombre}</p>
+                          <p className={cn('text-[11px] text-amber-500')}>Stock bajo: {p.cantidad ?? 0} unidades</p>
+                        </div>
+                      </div>
+                    ))}
+                    {debts.filter(d => d.status !== 'pagada').length === 0 && inventory.filter(p => (p.cantidad ?? 0) < 5).length === 0 && (
+                      <div className="px-4 py-6 text-center">
+                        <p className={cn('text-sm', isDarkMode ? 'text-white/40' : 'text-black/40')}>Todo en orden 🎉</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+            <button onClick={() => setShowLogoutConfirm(true)} className="text-gray-400 hover:text-gray-600 cursor-pointer transition-colors" title="Cerrar sesión">
+              <LogOut className="w-5 h-5" />
+            </button>
+          </div>
           <button
             onClick={() => setShowSuggestions(true)}
             className={cn(
-              "w-10 h-10 flex items-center justify-center rounded-full transition-colors",
-              isDarkMode ? "hover:bg-white/10 text-[#FFD700]" : "hover:bg-black/5 text-[#B8860B]"
+              'md:hidden w-10 h-10 flex items-center justify-center rounded-full transition-colors',
+              isDarkMode ? 'hover:bg-white/10 text-[#FFD700]' : 'hover:bg-black/5 text-[#B8860B]'
             )}
             title="Buzón de sugerencias"
           >
@@ -119,8 +344,8 @@ export const Layout = ({
           <button
             onClick={() => setShowManual(true)}
             className={cn(
-              "w-10 h-10 flex items-center justify-center rounded-full transition-colors",
-              isDarkMode ? "hover:bg-white/10 text-[#FFD700]" : "hover:bg-black/5 text-[#B8860B]"
+              'md:hidden w-10 h-10 flex items-center justify-center rounded-full transition-colors',
+              isDarkMode ? 'hover:bg-white/10 text-[#FFD700]' : 'hover:bg-black/5 text-[#B8860B]'
             )}
             title="Ayuda"
           >
@@ -129,8 +354,8 @@ export const Layout = ({
           <button
             onClick={toggleDarkMode}
             className={cn(
-              "w-10 h-10 flex items-center justify-center rounded-full transition-colors",
-              isDarkMode ? "hover:bg-white/10 text-[#FFD700]" : "hover:bg-black/5 text-[#B8860B]"
+              'md:hidden w-10 h-10 flex items-center justify-center rounded-full transition-colors',
+              isDarkMode ? 'hover:bg-white/10 text-[#FFD700]' : 'hover:bg-black/5 text-[#B8860B]'
             )}
           >
             {isDarkMode ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
@@ -138,94 +363,104 @@ export const Layout = ({
           <button
             onClick={() => setActiveTab('perfil')}
             className={cn(
-              "w-10 h-10 flex items-center justify-center rounded-full transition-colors",
+              'md:hidden w-10 h-10 flex items-center justify-center rounded-full transition-colors',
               activeTab === 'perfil'
-                ? (isDarkMode ? "bg-[#FFD700]/10 text-[#FFD700]" : "bg-[#FFD700]/20 text-[#B8860B]")
-                : (isDarkMode ? "hover:bg-white/10 text-[#FFD700]" : "hover:bg-black/5 text-[#B8860B]")
+                ? (isDarkMode ? 'bg-[#FFD700]/10 text-[#FFD700]' : 'bg-[#FFD700]/20 text-[#B8860B]')
+                : (isDarkMode ? 'hover:bg-white/10 text-[#FFD700]' : 'hover:bg-black/5 text-[#B8860B]')
             )}
           >
             <User className="w-6 h-6" />
           </button>
-          <img src="/logoapp.png" alt="Voz-Activa" className="w-10 h-10 object-contain" />
+          <img src="/logoapp.png" alt="Voz-Activa" className="w-10 h-10 object-contain md:hidden" />
         </div>
       </header>
 
-      <main className="pt-24 px-4 sm:px-6 max-w-md mx-auto w-full">
+      {/* ── Main content ── */}
+      <main className="pt-24 pb-4 px-4 sm:px-6 max-w-md mx-auto w-full md:max-w-none md:mx-0 md:w-auto md:ml-60 md:px-8 md:pt-24 md:pb-10">
         {children}
       </main>
 
       {/* Floating Chat Bubble */}
       <ChatBubble isDarkMode={isDarkMode} userId={userId} debts={debts} inventory={inventory} />
 
-      {/* Bottom Nav */}
+      {/* ── Bottom Nav (mobile only) ── */}
       <nav className={cn(
-        "fixed bottom-0 left-0 w-full z-50 backdrop-blur-2xl flex justify-around items-center px-4 pb-4 h-[88px] rounded-t-[3rem] shadow-[0_-8px_32px_rgba(0,0,0,0.1)] transition-colors duration-500",
-        isDarkMode ? "bg-[#1A1A1A]/90" : "bg-white/90"
+        'md:hidden fixed bottom-0 left-0 w-full z-50 backdrop-blur-2xl flex justify-around items-center px-4 pb-4 h-[88px] rounded-t-[3rem] shadow-[0_-8px_32px_rgba(0,0,0,0.1)] transition-colors duration-500',
+        isDarkMode ? 'bg-[#1A1A1A]/90' : 'bg-white/90'
       )}>
-        <NavButton 
-          active={activeTab === 'inicio'} 
-          onClick={() => setActiveTab('inicio')} 
-          icon={<Home />} 
-          label="Inicio" 
-          isDarkMode={isDarkMode}
-        />
-        <NavButton 
-          active={activeTab === 'finanzas'} 
-          onClick={() => setActiveTab('finanzas')} 
-          icon={<TrendingUp />} 
-          label="Finanzas" 
-          isDarkMode={isDarkMode}
-        />
-        <NavButton
-          active={activeTab === 'camara'}
-          onClick={() => setActiveTab('camara')}
-          icon={<Users />}
-          label="Deudas"
-          isDarkMode={isDarkMode}
-        />
-        <NavButton 
-          active={activeTab === 'inventario'} 
-          onClick={() => setActiveTab('inventario')} 
-          icon={<Package />} 
-          label="Inventario" 
-          isDarkMode={isDarkMode}
-        />
-        <NavButton 
-          active={activeTab === 'pasaporte'} 
-          onClick={() => setActiveTab('pasaporte')} 
-          icon={<Wallet />} 
-          label="Pasaporte" 
-          isDarkMode={isDarkMode}
-        />
+        {navItems.map(({ tab, icon, label }) => (
+          <React.Fragment key={tab}>
+            <NavButton
+              active={activeTab === tab}
+              onClick={() => setActiveTab(tab)}
+              icon={icon}
+              label={label}
+              isDarkMode={isDarkMode}
+            />
+          </React.Fragment>
+        ))}
       </nav>
     </div>
   );
 };
 
-const NavButton = ({ 
-  active, 
-  onClick, 
-  icon, 
-  label, 
-  isDarkMode 
-}: { 
-  active: boolean, 
-  onClick: () => void, 
-  icon: React.ReactNode, 
-  label: string,
-  isDarkMode: boolean
+const SidebarButton = ({
+  active,
+  onClick,
+  icon,
+  label,
+  isDarkMode,
+}: {
+  active: boolean;
+  onClick: () => void;
+  icon: React.ReactNode;
+  label: string;
+  isDarkMode: boolean;
 }) => (
-  <button 
+  <button
     onClick={onClick}
     className={cn(
-      "flex flex-col items-center justify-center px-3 py-2 rounded-full transition-all duration-300 ease-out",
-      active 
-        ? (isDarkMode ? "bg-[#FFD700]/10 text-[#FFD700]" : "bg-[#FFD700]/20 text-[#B8860B]") 
-        : (isDarkMode ? "text-[#FDFBF0]/40 hover:bg-white/5" : "text-[#2e2f2d]/60 hover:bg-[#f1f1ee]")
+      'w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-bold transition-all duration-200',
+      active
+        ? isDarkMode
+          ? 'bg-[#FFD700]/10 text-[#FFD700]'
+          : 'bg-[#FFD700]/20 text-[#B8860B]'
+        : isDarkMode
+          ? 'text-white/50 hover:bg-white/5 hover:text-white/80'
+          : 'text-black/50 hover:bg-black/5 hover:text-black/80'
     )}
   >
-    {React.cloneElement(icon as React.ReactElement, { 
-      className: cn("w-6 h-6", active && "fill-current") 
+    {React.cloneElement(icon as React.ReactElement, {
+      className: cn('w-5 h-5 flex-shrink-0', active && 'fill-current'),
+    })}
+    {label}
+  </button>
+);
+
+const NavButton = ({
+  active,
+  onClick,
+  icon,
+  label,
+  isDarkMode,
+}: {
+  active: boolean;
+  onClick: () => void;
+  icon: React.ReactNode;
+  label: string;
+  isDarkMode: boolean;
+}) => (
+  <button
+    onClick={onClick}
+    className={cn(
+      'flex flex-col items-center justify-center px-3 py-2 rounded-full transition-all duration-300 ease-out',
+      active
+        ? isDarkMode ? 'bg-[#FFD700]/10 text-[#FFD700]' : 'bg-[#FFD700]/20 text-[#B8860B]'
+        : isDarkMode ? 'text-[#FDFBF0]/40 hover:bg-white/5' : 'text-[#2e2f2d]/60 hover:bg-[#f1f1ee]'
+    )}
+  >
+    {React.cloneElement(icon as React.ReactElement, {
+      className: cn('w-6 h-6', active && 'fill-current'),
     })}
     <span className="font-medium text-[10px] mt-1">{label}</span>
   </button>
