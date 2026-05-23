@@ -551,7 +551,8 @@ export const CameraView = ({ isDarkMode, debts, userId, inventory }: Props) => {
         </div>
         <div className="text-center px-6">
           <p className={cn('font-black text-lg', isDarkMode ? 'text-[#FDFBF0]' : 'text-[#2e2f2d]')}>
-            Sube o toma una foto
+            <span className="md:hidden">Sube o toma una foto</span>
+            <span className="hidden md:inline">Sube una foto</span>
           </p>
           <p className={cn('text-sm mt-1', isDarkMode ? 'text-white/40' : 'text-black/40')}>
             De tu cuaderno, lista o tabla
@@ -580,11 +581,11 @@ export const CameraView = ({ isDarkMode, debts, userId, inventory }: Props) => {
           )}
         >
           <Upload className="w-5 h-5" />
-          Galería
+          Subir foto
         </button>
         <button
           onClick={() => cameraRef.current?.click()}
-          className="flex-[1.4] h-14 bg-gradient-to-br from-[#B8860B] to-[#FFD700] rounded-2xl flex items-center justify-center gap-2 font-bold text-black shadow-lg active:scale-95 transition-all"
+          className="md:hidden flex-[1.4] h-14 bg-gradient-to-br from-[#B8860B] to-[#FFD700] rounded-2xl flex items-center justify-center gap-2 font-bold text-black shadow-lg active:scale-95 transition-all"
         >
           <Camera className="w-5 h-5" />
           Tomar foto
@@ -1527,16 +1528,28 @@ export const CameraView = ({ isDarkMode, debts, userId, inventory }: Props) => {
         {/* Header */}
         <div className="flex items-center justify-between">
           <h2 className="text-2xl font-black">Deudas y Fiados</h2>
-          <button
-            onClick={() => { setShowDebtForm(v => !v); setDebtFormNombre(''); setDebtFormMonto(''); setDebtFormFecha(new Date().toISOString().split('T')[0]); }}
-            className={cn(
-              'flex items-center gap-2 px-5 py-2.5 rounded-xl font-bold text-sm transition-all active:scale-[0.98]',
-              showDebtForm ? 'bg-red-500 text-white' : 'bg-[#B8860B] text-white'
-            )}
-          >
-            {showDebtForm ? <X className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
-            {showDebtForm ? 'Cancelar' : ' Agregar deuda o fiado'}
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => galleryRef.current?.click()}
+              className={cn(
+                'flex items-center gap-2 px-4 py-2.5 rounded-xl font-bold text-sm transition-all active:scale-[0.98] border',
+                isDarkMode ? 'bg-[#1A1A1A] text-[#FDFBF0] border-white/10 hover:border-[#B8860B]/50' : 'bg-white text-[#2e2f2d] border-black/10 hover:border-[#B8860B]/50 shadow-sm'
+              )}
+            >
+              <Upload className="w-4 h-4" />
+              Subir foto
+            </button>
+            <button
+              onClick={() => { setShowDebtForm(v => !v); setDebtFormNombre(''); setDebtFormMonto(''); setDebtFormFecha(new Date().toISOString().split('T')[0]); }}
+              className={cn(
+                'flex items-center gap-2 px-5 py-2.5 rounded-xl font-bold text-sm transition-all active:scale-[0.98]',
+                showDebtForm ? 'bg-red-500 text-white' : 'bg-[#B8860B] text-white'
+              )}
+            >
+              {showDebtForm ? <X className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
+              {showDebtForm ? 'Cancelar' : 'Agregar deuda o fiado'}
+            </button>
+          </div>
         </div>
 
         {/* Inline add form */}
@@ -1821,7 +1834,13 @@ export const CameraView = ({ isDarkMode, debts, userId, inventory }: Props) => {
 
       {/* ── Desktop layout ── */}
       <div className="hidden md:block" onClick={() => setOpenDropdownId(null)}>
-        {renderDesktopDeudasSection()}
+        {step === 'mode-select' && renderModeSelect()}
+        {step === 'analyzing' && renderAnalyzing()}
+        {(step === 'table' || step === 'saving') && ocrMode === 'ventas-dia' && renderVentasTable()}
+        {(step === 'table' || step === 'saving') && ocrMode === 'nuevo-stock' && renderStockTable()}
+        {(step === 'table' || step === 'saving') && (ocrMode === 'fiados-me-deben' || ocrMode === 'fiados-debo') && renderFiadosTable()}
+        {step === 'success' && renderSuccess()}
+        {step === 'idle' && renderDesktopDeudasSection()}
       </div>
 
       {/* Toast flotante */}
