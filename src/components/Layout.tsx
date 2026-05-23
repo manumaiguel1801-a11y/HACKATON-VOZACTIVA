@@ -13,6 +13,7 @@ import {
   MessageCircle,
   Bell,
   LogOut,
+  X,
 } from 'lucide-react';
 import { signOut } from 'firebase/auth';
 import { auth } from '../firebase';
@@ -54,6 +55,8 @@ export const Layout = ({
 }: LayoutProps) => {
   const [showManual, setShowManual] = React.useState(false);
   const [showSuggestions, setShowSuggestions] = React.useState(false);
+  const [showNotifications, setShowNotifications] = React.useState(false);
+  const [showLogoutConfirm, setShowLogoutConfirm] = React.useState(false);
 
   const cleanName = userName.startsWith('Hola, ') ? userName.replace('Hola, ', '') : userName;
 
@@ -90,6 +93,46 @@ export const Layout = ({
           fromName={cleanName}
           onClose={() => setShowSuggestions(false)}
         />
+      )}
+
+      {showLogoutConfirm && (
+        <div className="fixed inset-0 z-[200] flex items-center justify-center p-6">
+          <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={() => setShowLogoutConfirm(false)} />
+          <div className={cn(
+            'relative w-full max-w-sm rounded-2xl shadow-2xl overflow-hidden z-10',
+            isDarkMode ? 'bg-[#1A1A1A] text-[#FDFBF0]' : 'bg-white text-[#2e2f2d]'
+          )}>
+            <div className="h-1 w-full bg-gradient-to-r from-[#B8860B] to-[#FFD700]" />
+            <div className="px-6 py-6 space-y-4">
+              <div className="flex items-center gap-3">
+                <div className={cn('w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0', isDarkMode ? 'bg-white/8' : 'bg-black/5')}>
+                  <LogOut className="w-5 h-5 text-[#B8860B]" />
+                </div>
+                <div>
+                  <p className="font-black text-base">¿Cerrar sesión?</p>
+                  <p className={cn('text-xs', isDarkMode ? 'text-white/50' : 'text-black/40')}>Tendrás que volver a iniciar sesión</p>
+                </div>
+              </div>
+              <div className="flex gap-3 pt-1">
+                <button
+                  onClick={() => setShowLogoutConfirm(false)}
+                  className={cn(
+                    'flex-1 h-11 rounded-xl font-bold text-sm transition-colors',
+                    isDarkMode ? 'bg-white/8 hover:bg-white/12 text-white/70' : 'bg-black/5 hover:bg-black/10 text-black/60'
+                  )}
+                >
+                  Cancelar
+                </button>
+                <button
+                  onClick={() => { setShowLogoutConfirm(false); signOut(auth); }}
+                  className="flex-1 h-11 rounded-xl font-black text-sm bg-gradient-to-r from-[#B8860B] to-[#FFD700] text-black shadow-md hover:opacity-90 transition-opacity"
+                >
+                  Cerrar sesión
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* ── Desktop sidebar ── */}
@@ -229,11 +272,62 @@ export const Layout = ({
             <button onClick={() => setShowManual(true)} className="w-5 h-5 text-gray-400 hover:text-gray-600 cursor-pointer transition-colors">
               <HelpCircle className="w-5 h-5" />
             </button>
-            <button className="relative text-gray-400 hover:text-gray-600 cursor-pointer transition-colors">
-              <Bell className="w-5 h-5" />
-              <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-[#B8860B]" />
-            </button>
-            <button onClick={() => signOut(auth)} className="text-gray-400 hover:text-gray-600 cursor-pointer transition-colors">
+            <div className="relative">
+              <button
+                onClick={() => setShowNotifications(v => !v)}
+                className="relative text-gray-400 hover:text-gray-600 cursor-pointer transition-colors"
+                title="Notificaciones"
+              >
+                <Bell className="w-5 h-5" />
+                {(debts.filter(d => d.status !== 'pagada').length > 0 || inventory.filter(p => (p.cantidad ?? 0) < 5).length > 0) && (
+                  <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-[#B8860B]" />
+                )}
+              </button>
+              {showNotifications && (
+                <div
+                  className={cn(
+                    'absolute right-0 top-8 w-72 rounded-2xl shadow-2xl border z-50 overflow-hidden',
+                    isDarkMode ? 'bg-[#1A1A1A] border-white/10' : 'bg-white border-black/5'
+                  )}
+                  onClick={e => e.stopPropagation()}
+                >
+                  <div className={cn('flex items-center justify-between px-4 py-3 border-b', isDarkMode ? 'border-white/8' : 'border-black/5')}>
+                    <p className="font-bold text-sm">Notificaciones</p>
+                    <button onClick={() => setShowNotifications(false)} className="opacity-40 hover:opacity-70 transition-opacity">
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+                  <div className="max-h-64 overflow-y-auto">
+                    {debts.filter(d => d.status !== 'pagada').slice(0, 3).map(d => (
+                      <div key={d.id} className={cn('flex items-start gap-3 px-4 py-3 border-b', isDarkMode ? 'border-white/5' : 'border-black/3')}>
+                        <span className="text-lg flex-shrink-0">💰</span>
+                        <div className="min-w-0">
+                          <p className="text-xs font-bold truncate">{d.name}</p>
+                          <p className={cn('text-[11px]', isDarkMode ? 'text-white/50' : 'text-black/50')}>
+                            {d.type === 'me-deben' ? 'Te debe' : 'Debes'} ${(d.amount - (d.amountPaid ?? 0)).toLocaleString('es-CO')}
+                          </p>
+                        </div>
+                      </div>
+                    ))}
+                    {inventory.filter(p => (p.cantidad ?? 0) < 5).slice(0, 3).map(p => (
+                      <div key={p.id} className={cn('flex items-start gap-3 px-4 py-3 border-b', isDarkMode ? 'border-white/5' : 'border-black/3')}>
+                        <span className="text-lg flex-shrink-0">📦</span>
+                        <div className="min-w-0">
+                          <p className="text-xs font-bold truncate">{p.nombre}</p>
+                          <p className={cn('text-[11px] text-amber-500')}>Stock bajo: {p.cantidad ?? 0} unidades</p>
+                        </div>
+                      </div>
+                    ))}
+                    {debts.filter(d => d.status !== 'pagada').length === 0 && inventory.filter(p => (p.cantidad ?? 0) < 5).length === 0 && (
+                      <div className="px-4 py-6 text-center">
+                        <p className={cn('text-sm', isDarkMode ? 'text-white/40' : 'text-black/40')}>Todo en orden 🎉</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+            <button onClick={() => setShowLogoutConfirm(true)} className="text-gray-400 hover:text-gray-600 cursor-pointer transition-colors" title="Cerrar sesión">
               <LogOut className="w-5 h-5" />
             </button>
           </div>

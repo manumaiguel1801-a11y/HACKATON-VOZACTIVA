@@ -12,13 +12,16 @@ import {
   Copy,
   CheckCircle2,
   X,
-  AlertCircle
+  AlertCircle,
+  Eye,
+  EyeOff
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { auth, db } from '../firebase';
 import {
   signInWithEmailAndPassword,
-  createUserWithEmailAndPassword
+  createUserWithEmailAndPassword,
+  sendPasswordResetEmail,
 } from 'firebase/auth';
 import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
 
@@ -51,6 +54,12 @@ export const Auth = ({ isDarkMode }: AuthProps) => {
   const [generatedEmail, setGeneratedEmail] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
 
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [resetSent, setResetSent] = useState(false);
+  const [showEmailInUseHint, setShowEmailInUseHint] = useState(false);
+
   // Form State
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -64,6 +73,21 @@ export const Auth = ({ isDarkMode }: AuthProps) => {
     e.preventDefault();
     setLoading(true);
     setError('');
+    setShowEmailInUseHint(false);
+
+    if (!isLogin) {
+      const reqs = getPasswordRequirements(password);
+      if (!reqs.every(r => r.met)) {
+        setError('La contraseña no cumple todos los requisitos de seguridad.');
+        setLoading(false);
+        return;
+      }
+      if (password !== confirmPassword) {
+        setError('Las contraseñas no coinciden. Verifica e intenta de nuevo.');
+        setLoading(false);
+        return;
+      }
+    }
 
     try {
       if (isLogin) {
@@ -90,6 +114,24 @@ export const Auth = ({ isDarkMode }: AuthProps) => {
           return;
         }
       }
+    } catch (err: any) {
+      if (err.code === 'auth/email-already-in-use') {
+        setShowEmailInUseHint(true);
+      }
+      setError(mensajeError(err.code ?? ''));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleResetPassword = async () => {
+    if (!email) return;
+    setLoading(true);
+    try {
+      await sendPasswordResetEmail(auth, email);
+      setResetSent(true);
+      setError('');
+      setShowEmailInUseHint(false);
     } catch (err: any) {
       setError(mensajeError(err.code ?? ''));
     } finally {
@@ -206,48 +248,53 @@ export const Auth = ({ isDarkMode }: AuthProps) => {
           {!isLogin && (
             <div className="space-y-4 animate-in fade-in slide-in-from-bottom-4 duration-500">
               <div className="grid grid-cols-2 gap-4">
-                <Input 
-                  icon={<User />} 
-                  placeholder="Nombres" 
-                  value={firstName} 
-                  onChange={setFirstName} 
+                <Input
+                  icon={<User />}
+                  placeholder="Nombres"
+                  value={firstName}
+                  onChange={setFirstName}
                   isDarkMode={isDarkMode}
                   required
                 />
-                <Input 
-                  icon={<User />} 
-                  placeholder="Apellidos" 
-                  value={lastName} 
-                  onChange={setLastName} 
+                <Input
+                  icon={<User />}
+                  placeholder="Apellidos"
+                  value={lastName}
+                  onChange={setLastName}
                   isDarkMode={isDarkMode}
                   required
                 />
               </div>
-              <Input 
-                icon={<IdCard />} 
-                placeholder="Número de Identificación" 
-                value={idNumber} 
-                onChange={setIdNumber} 
+              <Input
+                icon={<IdCard />}
+                placeholder="Número de Identificación"
+                value={idNumber}
+                onChange={setIdNumber}
                 isDarkMode={isDarkMode}
                 required
               />
-              <Input 
-                icon={<Phone />} 
-                placeholder="Teléfono" 
-                value={phone} 
-                onChange={setPhone} 
+              <Input
+                icon={<Phone />}
+                placeholder="Teléfono"
+                value={phone}
+                onChange={setPhone}
                 isDarkMode={isDarkMode}
                 required
               />
-              <Input 
-                icon={<Calendar />} 
-                placeholder="Fecha de Nacimiento" 
-                type="date"
-                value={birthDate} 
-                onChange={setBirthDate} 
-                isDarkMode={isDarkMode}
-                required
-              />
+              <div className="space-y-1.5">
+                <p className={cn('text-xs font-semibold px-1', isDarkMode ? 'text-white/40' : 'text-black/40')}>
+                  Fecha de nacimiento
+                </p>
+                <Input
+                  icon={<Calendar />}
+                  placeholder="Fecha de Nacimiento"
+                  type="date"
+                  value={birthDate}
+                  onChange={setBirthDate}
+                  isDarkMode={isDarkMode}
+                  required
+                />
+              </div>
             </div>
           )}
 
@@ -290,17 +337,63 @@ export const Auth = ({ isDarkMode }: AuthProps) => {
               onChange={setPassword}
               isDarkMode={isDarkMode}
               required
+              showToggle
+              showValue={showPassword}
+              onToggle={() => setShowPassword(v => !v)}
             />
+            {!isLogin && password.length > 0 && (
+              <PasswordRequirements password={password} isDarkMode={isDarkMode} />
+            )}
+            {!isLogin && (
+              <Input
+                icon={<Lock />}
+                placeholder="Confirmar Contraseña"
+                type="password"
+                value={confirmPassword}
+                onChange={setConfirmPassword}
+                isDarkMode={isDarkMode}
+                required
+                showToggle
+                showValue={showConfirmPassword}
+                onToggle={() => setShowConfirmPassword(v => !v)}
+              />
+            )}
           </div>
 
-          {error && (
-            <div className="flex items-start gap-3 bg-[#FEE2E2] text-[#991B1B] px-4 py-3 rounded-xl">
-              <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />
-              <p className="text-sm font-medium leading-snug">{error}</p>
+          {resetSent && (
+            <div className="flex items-start gap-3 bg-green-50 text-green-800 px-4 py-3 rounded-xl">
+              <CheckCircle2 className="w-4 h-4 mt-0.5 shrink-0" />
+              <p className="text-sm font-medium leading-snug">
+                Te enviamos un correo para restablecer tu contraseña. Revisa tu bandeja de entrada.
+              </p>
             </div>
           )}
 
-          <button 
+          {error && !resetSent && (
+            <div className="space-y-2">
+              <div className="flex items-start gap-3 bg-[#FEE2E2] text-[#991B1B] px-4 py-3 rounded-xl">
+                <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />
+                <p className="text-sm font-medium leading-snug">{error}</p>
+              </div>
+              {showEmailInUseHint && email && (
+                <div className={cn('px-4 py-3 rounded-xl text-sm space-y-2', isDarkMode ? 'bg-[#1A1A1A]' : 'bg-[#f4f4f0]')}>
+                  <p className={cn('font-medium', isDarkMode ? 'text-white/70' : 'text-black/60')}>
+                    ¿Ya tenías una cuenta y olvidaste tu contraseña?
+                  </p>
+                  <button
+                    type="button"
+                    onClick={handleResetPassword}
+                    disabled={loading}
+                    className="font-bold text-[#B8860B] hover:underline disabled:opacity-50"
+                  >
+                    Enviar correo para restablecer contraseña →
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+
+          <button
             type="submit"
             disabled={loading}
             className="w-full h-16 bg-gradient-to-r from-[#B8860B] to-[#FFD700] text-black rounded-2xl font-bold text-lg flex items-center justify-center gap-3 shadow-xl active:scale-[0.98] transition-all disabled:opacity-50 mt-8"
@@ -314,9 +407,19 @@ export const Auth = ({ isDarkMode }: AuthProps) => {
         <div className="mt-8 space-y-4 text-center">
           {isLogin ? (
             <>
+              {email && (
+                <button
+                  type="button"
+                  onClick={handleResetPassword}
+                  disabled={loading}
+                  className={cn('text-sm disabled:opacity-50', isDarkMode ? 'text-white/40 hover:text-white/70' : 'text-black/40 hover:text-black/60')}
+                >
+                  ¿Olvidaste tu contraseña?
+                </button>
+              )}
               <p className="opacity-60 font-medium">¿No tienes cuenta?</p>
               <button
-                onClick={() => { setIsLogin(false); setNoEmail(false); }}
+                onClick={() => { setIsLogin(false); setNoEmail(false); setConfirmPassword(''); setShowPassword(false); setShowConfirmPassword(false); setResetSent(false); setError(''); }}
                 className="text-[#B8860B] font-bold hover:underline"
               >
                 Crear Cuenta
@@ -324,7 +427,7 @@ export const Auth = ({ isDarkMode }: AuthProps) => {
             </>
           ) : (
             <button
-              onClick={() => setIsLogin(true)}
+              onClick={() => { setIsLogin(true); setConfirmPassword(''); setShowPassword(false); setShowConfirmPassword(false); }}
               className="flex items-center justify-center gap-2 text-[#B8860B] font-bold mx-auto hover:underline"
             >
               <ChevronLeft className="w-5 h-5" />
@@ -338,6 +441,93 @@ export const Auth = ({ isDarkMode }: AuthProps) => {
   );
 };
 
+type PasswordReq = { label: string; met: boolean };
+
+function getPasswordRequirements(password: string): PasswordReq[] {
+  return [
+    { label: 'Mínimo 8 caracteres',         met: password.length >= 8 },
+    { label: 'Al menos 1 letra mayúscula',   met: /[A-Z]/.test(password) },
+    { label: 'Al menos 1 letra minúscula',   met: /[a-z]/.test(password) },
+    { label: 'Al menos 1 número',            met: /[0-9]/.test(password) },
+    { label: 'Al menos 1 carácter especial', met: /[^A-Za-z0-9]/.test(password) },
+  ];
+}
+
+function getStrength(reqs: PasswordReq[]): { level: number; label: string; color: string } {
+  const met = reqs.filter(r => r.met).length;
+  if (met <= 1) return { level: 1, label: 'Muy débil',  color: '#ef4444' };
+  if (met === 2) return { level: 2, label: 'Débil',     color: '#f97316' };
+  if (met === 3) return { level: 3, label: 'Regular',   color: '#eab308' };
+  if (met === 4) return { level: 4, label: 'Fuerte',    color: '#22c55e' };
+  return              { level: 5, label: '¡Excelente!', color: '#16a34a' };
+}
+
+const PasswordRequirements = ({ password, isDarkMode }: { password: string; isDarkMode: boolean }) => {
+  const reqs = getPasswordRequirements(password);
+  const strength = getStrength(reqs);
+  const segments = 5;
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: -6 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, y: -6 }}
+      transition={{ duration: 0.2 }}
+      className={cn(
+        'rounded-xl px-4 py-3.5 space-y-3',
+        isDarkMode ? 'bg-[#1A1A1A]' : 'bg-white shadow-sm'
+      )}
+    >
+      {/* Barra de fuerza */}
+      <div className="space-y-1.5">
+        <div className="flex justify-between items-center">
+          <span className={cn('text-[11px] font-semibold uppercase tracking-wider', isDarkMode ? 'text-white/40' : 'text-black/40')}>
+            Seguridad
+          </span>
+          <span className="text-[11px] font-bold" style={{ color: strength.color }}>
+            {strength.label}
+          </span>
+        </div>
+        <div className="flex gap-1">
+          {Array.from({ length: segments }).map((_, i) => (
+            <div
+              key={i}
+              className="h-1.5 flex-1 rounded-full transition-all duration-300"
+              style={{
+                backgroundColor: i < strength.level ? strength.color : isDarkMode ? '#333' : '#e5e7eb',
+              }}
+            />
+          ))}
+        </div>
+      </div>
+
+      {/* Checklist */}
+      <ul className="space-y-1.5">
+        {reqs.map((req) => (
+          <li key={req.label} className="flex items-center gap-2">
+            <div className={cn(
+              'w-4 h-4 rounded-full flex items-center justify-center flex-shrink-0 transition-all duration-300',
+              req.met ? 'bg-green-500' : isDarkMode ? 'bg-white/10' : 'bg-black/8'
+            )}>
+              {req.met
+                ? <CheckCircle2 className="w-3 h-3 text-white" />
+                : <X className="w-2.5 h-2.5 text-red-400" strokeWidth={3} />}
+            </div>
+            <span className={cn(
+              'text-xs font-medium transition-colors duration-300',
+              req.met
+                ? 'text-green-500'
+                : isDarkMode ? 'text-white/50' : 'text-black/50'
+            )}>
+              {req.label}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </motion.div>
+  );
+};
+
 const Input = ({
   icon,
   placeholder,
@@ -347,6 +537,9 @@ const Input = ({
   isDarkMode,
   required = false,
   disabled = false,
+  showToggle = false,
+  showValue = false,
+  onToggle,
 }: {
   icon: React.ReactNode,
   placeholder: string,
@@ -356,6 +549,9 @@ const Input = ({
   isDarkMode: boolean,
   required?: boolean,
   disabled?: boolean,
+  showToggle?: boolean,
+  showValue?: boolean,
+  onToggle?: () => void,
 }) => (
   <div className={cn(
     "relative flex items-center h-14 rounded-xl transition-all duration-300",
@@ -366,7 +562,7 @@ const Input = ({
       {React.cloneElement(icon as React.ReactElement, { className: "w-5 h-5" })}
     </div>
     <input
-      type={type}
+      type={showToggle ? (showValue ? "text" : "password") : type}
       placeholder={placeholder}
       value={value}
       onChange={(e) => onChange(e.target.value)}
@@ -377,5 +573,17 @@ const Input = ({
         isDarkMode ? "text-[#FDFBF0] placeholder:text-[#FDFBF0]/30" : "text-[#2e2f2d] placeholder:text-[#5b5c5a]/50"
       )}
     />
+    {showToggle && (
+      <button
+        type="button"
+        onClick={onToggle}
+        className="pr-4 text-[#B8860B]/50 hover:text-[#B8860B] transition-colors"
+        tabIndex={-1}
+      >
+        {showValue
+          ? <EyeOff className="w-5 h-5" />
+          : <Eye className="w-5 h-5" />}
+      </button>
+    )}
   </div>
 );

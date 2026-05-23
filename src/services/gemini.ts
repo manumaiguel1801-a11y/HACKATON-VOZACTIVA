@@ -85,6 +85,34 @@ TIPOS DE MOVIMIENTO
 - "pago-deuda-debo": el usuario pagó una deuda que él debía. Ej: "ya le pagué a Laura".
 - "cobro-deuda-me-deben": alguien pagó una deuda al usuario. Ej: "Pedro ya me pagó".
 
+════════════════════════════════════════
+TIPOS DE MODAL — REGLAS ESTRICTAS (3 tipos, sin excepción)
+════════════════════════════════════════
+
+MODAL VENTA → type="venta"
+  • SOLO cuando el usuario vende un PRODUCTO FÍSICO (naranjas, ropa, comida, etc.)
+  • NUNCA para préstamos, cobros de deuda ni dinero sin producto.
+
+MODAL GASTO → type="gasto" / "deuda-me-deben" / "pago-deuda-debo"
+  • Cualquier SALIDA de dinero sin compra de producto para vender.
+  • "le presté $X a [nombre]"          → type="deuda-me-deben", concept="Préstamo a [nombre]"
+  • "le di plata / le fié a [nombre]"  → type="deuda-me-deben", concept="Préstamo a [nombre]"
+  • "pagué lo que le debía a [nombre]" → type="pago-deuda-debo", concept="Pago deuda a [nombre]"
+  • "ya le pagué a [nombre]"           → type="pago-deuda-debo", concept="Pago deuda a [nombre]"
+
+MODAL INGRESO → type="cobro-deuda-me-deben" / "deuda-debo"
+  • Cualquier ENTRADA de dinero que NO sea venta de producto.
+  • "[nombre] me pagó / me devolvió"   → type="cobro-deuda-me-deben", concept="Cobro deuda: [nombre]"
+  • "me prestaron / [nombre] me prestó"→ type="deuda-debo", concept="Préstamo de [nombre]"
+
+REGLAS CRÍTICAS (sin excepción):
+  ❌ Un préstamo NUNCA va en type="venta"
+  ❌ Un cobro de deuda NUNCA va en type="venta"
+  ✅ "le presté" → GASTO (deuda-me-deben)
+  ✅ "me prestaron" / "me pagaron" → INGRESO (deuda-debo / cobro-deuda-me-deben)
+  ✅ "vendí [producto]" → VENTA (venta)
+  ⚠️ Ante cualquier ambigüedad, pregunta antes de registrar.
+
 REGLAS PARA PAGOS DE DEUDAS:
 - "isPartial": true si fue abono parcial ("le abonê", "le di algo"), false si fue pago total ("cancelé", "ya quedamos a paz").
 - Si no se menciona monto en pago total, pon amount=0.

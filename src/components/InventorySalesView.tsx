@@ -107,7 +107,37 @@ export const InventorySalesView = ({ isDarkMode, sales, inventory, userId }: Pro
 
       {/* ── Desktop layout ── */}
       <div className="hidden md:block">
-        <InventorySection isDarkMode={isDarkMode} inventory={inventory} userId={userId} />
+        <div className={cn('flex p-1 rounded-2xl transition-colors max-w-xs mb-6', isDarkMode ? 'bg-[#1A1A1A]' : 'bg-[#f1f1ee]')}>
+          <button
+            onClick={() => setActiveSubTab('inventario')}
+            className={cn(
+              'flex-1 py-2.5 rounded-xl font-bold flex items-center justify-center gap-2 transition-all text-sm',
+              activeSubTab === 'inventario'
+                ? isDarkMode ? 'bg-[#B8860B] text-black shadow-lg' : 'bg-white text-[#B8860B] shadow-sm'
+                : 'opacity-50'
+            )}
+          >
+            <Package className="w-4 h-4" />
+            Inventario
+          </button>
+          <button
+            onClick={() => setActiveSubTab('ventas')}
+            className={cn(
+              'flex-1 py-2.5 rounded-xl font-bold flex items-center justify-center gap-2 transition-all text-sm',
+              activeSubTab === 'ventas'
+                ? isDarkMode ? 'bg-[#B8860B] text-black shadow-lg' : 'bg-white text-[#B8860B] shadow-sm'
+                : 'opacity-50'
+            )}
+          >
+            <ShoppingBag className="w-4 h-4" />
+            Ventas
+          </button>
+        </div>
+        {activeSubTab === 'inventario' ? (
+          <InventorySection isDarkMode={isDarkMode} inventory={inventory} userId={userId} />
+        ) : (
+          <SalesSection isDarkMode={isDarkMode} sales={sales} />
+        )}
       </div>
     </div>
   );

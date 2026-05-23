@@ -301,6 +301,30 @@ export const Dashboard = ({ isDarkMode, userId, sales, expenses, inventory = [],
     return (
       <div className="space-y-5">
 
+        {/* ── Action buttons ── */}
+        <div className="flex items-center justify-between">
+          <h2 className={cn('text-2xl font-black', isDarkMode ? 'text-[#FDFBF0]' : 'text-[#2e2f2d]')}>Resumen</h2>
+          <div className="flex gap-3">
+            <button
+              onClick={() => setShowSaleModal(true)}
+              className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-gradient-to-r from-[#B8860B] to-[#FFD700] text-black font-bold text-sm shadow-md hover:opacity-90 transition-opacity"
+            >
+              <Plus className="w-4 h-4" />
+              Registrar Venta
+            </button>
+            <button
+              onClick={() => setShowExpenseModal(true)}
+              className={cn(
+                'flex items-center gap-2 px-4 py-2.5 rounded-xl font-bold text-sm border-2 transition-all',
+                isDarkMode ? 'bg-[#1A1A1A] border-red-500/30 text-red-400 hover:border-red-500/50' : 'bg-white border-red-200 text-red-500 shadow-sm hover:border-red-300'
+              )}
+            >
+              <TrendingDown className="w-4 h-4" />
+              Registrar Gasto
+            </button>
+          </div>
+        </div>
+
         {/* ── Fila 1: 4 metric cards ── */}
         <div className="grid grid-cols-4 gap-4">
           {[
