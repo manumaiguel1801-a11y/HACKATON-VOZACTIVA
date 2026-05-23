@@ -1,0 +1,25 @@
+{
+  "entities": {
+    "User": {
+      "title": "User Profile",
+      "description": "Information about the informal vendor user.",
+      "type": "object",
+      "properties": {
+        "firstName": { "type": "string", "description": "User's first name" },
+        "lastName": { "type": "string", "description": "User's last name" },
+        "idNumber": { "type": "string", "description": "Identification number" },
+        "phone": { "type": "string", "description": "Phone number" },
+        "birthDate": { "type": "string", "format": "date", "description": "Date of birth" },
+        "email": { "type": "string", "format": "email", "description": "Email address" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Account creation timestamp" }
+      },
+      "required": ["firstName", "lastName", "idNumber", "phone", "birthDate"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "User profile document indexed by Firebase Auth UID."
+    }
+  }
+}
