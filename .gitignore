@@ -1,0 +1,15 @@
+node_modules/
+build/
+dist/
+coverage/
+.DS_Store
+*.log
+.env*
+!.env.example
+
+# Firebase client config (contains apiKey — copy from firebase-applet-config.example.json)
+firebase-applet-config.json
+
+# Local tooling — no subir al repo
+.claude/
+fix-telegram.cjs

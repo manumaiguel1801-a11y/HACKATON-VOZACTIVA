@@ -1,0 +1,9 @@
+{
+  "functions": {
+    "api/telegram.ts": { "maxDuration": 30 },
+    "api/whatsapp.ts": { "maxDuration": 30 }
+  },
+  "rewrites": [
+    { "source": "/((?!api/).*)", "destination": "/index.html" }
+  ]
+}
