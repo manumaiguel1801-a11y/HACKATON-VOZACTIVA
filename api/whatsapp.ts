@@ -3,6 +3,7 @@ import { initializeApp, getApps, cert } from 'firebase-admin/app';
 import { getFirestore, FieldValue, Timestamp } from 'firebase-admin/firestore';
 import { processMessage, handlePendingState, looksLikeNewCommand, type HistoryEntry, type PendingState } from './_lib/processMessage.js';
 import { sendWhatsApp, MSG_NOT_LINKED, MSG_HELP } from './_lib/whatsapp-bot.js';
+import { logEvent, getRecentLogs, formatLogsForWhatsApp, type LogLevel } from './_lib/logger.js';
 
 // ─── Firebase Admin init ──────────────────────────────────────────────────────
 function getAdminApp() {
@@ -50,9 +51,31 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const msgId = msg.id as string | undefined;
   const text = msg.text.body.trim();
 
+  // Logged send wrapper — every outgoing message is persisted to whatsappLogs
+  const sendAndLog = async (replyText: string, stage: string, level: LogLevel = 'info') => {
+    await sendWhatsApp(from, replyText);
+    await logEvent(db, { phone: from, direction: 'out', level, stage, text: replyText });
+  };
+
+  // Log every incoming webhook message
+  await logEvent(db, {
+    phone: from,
+    direction: 'in',
+    level: 'info',
+    stage: 'webhook-received',
+    text,
+    context: { msgId },
+  });
+
   try {
     if (/^(\/ayuda|\/help|ayuda)$/i.test(text)) {
-      await sendWhatsApp(from, MSG_HELP);
+      await sendAndLog(MSG_HELP, 'cmd-ayuda');
+      return;
+    }
+
+    if (/^(\/logs|\/debug|logs|debug)$/i.test(text)) {
+      const logs = await getRecentLogs(db, from, 15);
+      await sendAndLog(formatLogsForWhatsApp(logs), 'cmd-logs');
       return;
     }
 
@@ -65,9 +88,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const cancelSnap = await db.collection('users').where('whatsappPhone', '==', from).limit(1).get();
       if (!cancelSnap.empty && cancelSnap.docs[0].data().whatsappPendingState) {
         await cancelSnap.docs[0].ref.update({ whatsappPendingState: FieldValue.delete() });
-        await sendWhatsApp(from, '✅ Operación cancelada. ¿Qué deseas registrar?');
+        await sendAndLog('✅ Operación cancelada. ¿Qué deseas registrar?', 'cmd-cancelar');
       } else {
-        await sendWhatsApp(from, 'ℹ️ No hay ninguna operación en curso.');
+        await sendAndLog('ℹ️ No hay ninguna operación en curso.', 'cmd-cancelar-noop');
       }
       return;
     }
@@ -80,7 +103,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           whatsappPendingState: FieldValue.delete(),
         });
       }
-      await sendWhatsApp(from, '✅ Conversación reiniciada. Ya puedes registrar normalmente.\n\nEjemplo: _"vendí 3 jugos a 3000"_');
+      await sendAndLog('✅ Conversación reiniciada. Ya puedes registrar normalmente.\n\nEjemplo: _"vendí 3 jugos a 3000"_', 'cmd-limpiar');
       return;
     }
 
@@ -90,7 +113,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       .get();
 
     if (snap.empty) {
-      await sendWhatsApp(from, MSG_NOT_LINKED);
+      await sendAndLog(MSG_NOT_LINKED, 'not-linked', 'warn');
       return;
     }
 
@@ -99,13 +122,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     // Deduplication: skip if this message was already processed
     if (msgId && userData.whatsappLastMsgId === msgId) {
+      await logEvent(db, { phone: from, direction: 'event', level: 'warn', stage: 'dedup-skip', context: { msgId } });
       return;
     }
 
     const history: HistoryEntry[] = (userData.whatsappHistory as HistoryEntry[] | undefined) ?? [];
     const pendingState = (userData.whatsappPendingState as PendingState | undefined) ?? null;
 
-    const send = (t: string) => sendWhatsApp(from, t);
+    const send = async (t: string) => {
+      await sendWhatsApp(from, t);
+      await logEvent(db, { phone: from, direction: 'out', level: 'info', stage: 'processMessage-reply', text: t });
+    };
 
     if (pendingState && looksLikeNewCommand(text)) {
       // Auto-cancel stale pending state and process as a fresh command
@@ -139,9 +166,26 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const errMsg = err?.message ?? String(err);
     const errStack = (err?.stack ?? '').split('\n').slice(0, 4).join('\n');
     const debugBlock = `[DEBUG WHATSAPP HANDLER]\n• error: ${errMsg}\n• stack:\n${errStack}`;
+    await logEvent(db, {
+      phone: from,
+      direction: 'event',
+      level: 'error',
+      stage: 'handler-catch',
+      text: errMsg,
+      context: { stack: errStack, incomingText: text },
+    });
     try {
       await sendWhatsApp(from, `⚠️ Hubo un error. Intenta de nuevo.\n\n${debugBlock}`);
-    } catch (_) { /* ignore */ }
+      await logEvent(db, { phone: from, direction: 'out', level: 'error', stage: 'handler-catch-reply', text: debugBlock });
+    } catch (sendErr: any) {
+      await logEvent(db, {
+        phone: from,
+        direction: 'event',
+        level: 'error',
+        stage: 'handler-catch-send-fail',
+        text: sendErr?.message ?? String(sendErr),
+      });
+    }
   } finally {
     res.status(200).end();
   }
