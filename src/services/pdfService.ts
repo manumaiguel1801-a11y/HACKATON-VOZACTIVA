@@ -2,7 +2,7 @@ import jsPDF from 'jspdf';
 import { doc as fsDoc, updateDoc, Timestamp } from 'firebase/firestore';
 import { db, auth } from '../firebase';
 import { Sale, Expense, Debt, UserProfile } from '../types';
-import { calculateScore, getScoreLabel, ScoreBreakdown, getBusinessAgeDays, getMonthlyProjection } from './scoringService';
+import { calculateScore, getScoreLabel, ScoreBreakdown, getBusinessAgeDays, getMonthlyProjection, ExtractoSummary } from './scoringService';
 
 // ─── Paleta ──────────────────────────────────────────���─────────────────────────
 const C = {
@@ -155,6 +155,7 @@ export async function generatePassportPDF(
   debts: Debt[],
   userId?: string,
   baseUrl?: string,
+  extractos: ExtractoSummary[] = [],
 ): Promise<{ blob: Blob; filename: string }> {
   const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
   const W = 210;
@@ -162,7 +163,7 @@ export async function generatePassportPDF(
   const CW = W - M * 2;  // content width
   const now = new Date();
 
-  const bd: ScoreBreakdown = calculateScore(sales, expenses, debts);
+  const bd: ScoreBreakdown = calculateScore(sales, expenses, debts, extractos);
   const totalIngresos = sales.reduce((s, v) => s + v.total, 0);
   const totalGastos   = expenses.reduce((s, e) => s + e.amount, 0);
   const margenNeto    = totalIngresos > 0
@@ -388,6 +389,7 @@ export async function generatePassportPDF(
     { label: 'Gestión de fiados y deudas',       value: bd.gestionFiados,        max: 20 },
     { label: 'Salud de inventario',              value: bd.saludInventario,      max: 15 },
     { label: 'Calidad y confiabilidad de datos', value: bd.calidadDatos,         max: 10 },
+    ...(bd.hasExtracto ? [{ label: 'Respaldo bancario verificado', value: bd.respaldoBancario, max: 20 }] : []),
   ];
 
   factors.forEach((f, i) => {

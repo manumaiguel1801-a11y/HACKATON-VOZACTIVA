@@ -21,7 +21,7 @@ import {
   AlertTriangle,
 } from 'lucide-react';
 import { PieChart, Pie, Cell, ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip } from 'recharts';
-import { collection, addDoc, getDocs, query, orderBy, limit, updateDoc, doc, serverTimestamp } from 'firebase/firestore';
+import { collection, addDoc, getDocs, query, orderBy, limit, updateDoc, doc, serverTimestamp, getDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 import { cn } from '../lib/utils';
 import { Sale, Expense, Debt, UserProfile, ScoreHistoryEntry } from '../types';
@@ -29,7 +29,7 @@ import {
   calculateScore, getScoreLabel, getScoreColor,
   getBusinessAgeDays, formatBusinessAge,
   getTopProducts, getMonthlyProjection, getNextLevel,
-  calculateScoreTrend,
+  calculateScoreTrend, ExtractoSummary,
 } from '../services/scoringService';
 import { generatePassportPDF } from '../services/pdfService';
 
@@ -95,12 +95,35 @@ export const PassportView = ({ isDarkMode, sales, expenses, debts, profile, user
   const [isSharing, setIsSharing] = useState(false);
   const [scoreHistory, setScoreHistory] = useState<ScoreHistoryEntry[]>([]);
   const [toast, setToast] = useState<string | null>(null);
+  const [extractos, setExtractos] = useState<ExtractoSummary[]>([]);
   const historyLoaded = useRef(false);
   const lastAlertedCategory = useRef<string | null>(null);
 
+  // Cargar extractos bancarios analizados desde Firestore
+  useEffect(() => {
+    if (!userId) return;
+    const load = async () => {
+      try {
+        const snap = await getDocs(
+          query(collection(db, 'users', userId, 'extractos'), orderBy('analyzedAt', 'desc')),
+        );
+        setExtractos(snap.docs.map(d => {
+          const data = d.data();
+          return {
+            totalIngresos:    data.totalIngresos    ?? 0,
+            totalGastos:      data.totalGastos      ?? 0,
+            porcentajeVentas: data.porcentajeVentas ?? 0,
+            passwordUnlocked: data.passwordUnlocked ?? false,
+          } as ExtractoSummary;
+        }));
+      } catch { /* silencioso */ }
+    };
+    load();
+  }, [userId]);
+
   const breakdown = useMemo(
-    () => calculateScore(sales, expenses, debts),
-    [sales, expenses, debts],
+    () => calculateScore(sales, expenses, debts, extractos),
+    [sales, expenses, debts, extractos],
   );
 
   const { scoreFinal, hasEnoughData } = breakdown;
@@ -211,7 +234,7 @@ export const PassportView = ({ isDarkMode, sales, expenses, debts, profile, user
     if (!hasEnoughData) return;
     setIsGenerating(true);
     try {
-      const { blob, filename } = await generatePassportPDF(profile, sales, expenses, debts, userId, window.location.origin);
+      const { blob, filename } = await generatePassportPDF(profile, sales, expenses, debts, userId, window.location.origin, extractos);
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
@@ -227,7 +250,7 @@ export const PassportView = ({ isDarkMode, sales, expenses, debts, profile, user
     if (!hasEnoughData) return;
     setIsSharing(true);
     try {
-      const { blob, filename } = await generatePassportPDF(profile, sales, expenses, debts, userId, window.location.origin);
+      const { blob, filename } = await generatePassportPDF(profile, sales, expenses, debts, userId, window.location.origin, extractos);
       const file = new File([blob], filename, { type: 'application/pdf' });
 
       if (navigator.canShare && navigator.canShare({ files: [file] })) {
@@ -300,6 +323,14 @@ export const PassportView = ({ isDarkMode, sales, expenses, debts, profile, user
       max: 10,
       tip: 'Registra tus movimientos con descripciones claras y de forma regular.',
     },
+    ...(breakdown.hasExtracto ? [{
+      label: 'Respaldo bancario',
+      description: 'Verificación con tu extracto bancario',
+      icon: <ShieldCheck className="w-5 h-5" />,
+      value: breakdown.respaldoBancario,
+      max: 20,
+      tip: 'Sube más extractos (hasta 3 meses) para maximizar este factor.',
+    }] : []),
   ], [breakdown]);
 
   const logros: Logro[] = useMemo(() => {
@@ -344,11 +375,12 @@ export const PassportView = ({ isDarkMode, sales, expenses, debts, profile, user
 
   // ─── Desktop desktop factors (spec names) ─────────────────────────────────
   const desktopFactors = useMemo(() => [
-    { label: 'Consistencia de ingresos', desc: 'Regularidad con la que registras ventas',         icon: <TrendingUp className="w-4 h-4" />, value: breakdown.consistenciaIngresos, max: 30 },
+    { label: 'Consistencia de ingresos', desc: 'Regularidad con la que registras ventas',         icon: <TrendingUp className="w-4 h-4" />,  value: breakdown.consistenciaIngresos, max: 30 },
     { label: 'Capacidad de pago',        desc: 'Ingresos netos después de cubrir gastos',          icon: <CreditCard className="w-4 h-4" />, value: breakdown.capacidadPago,         max: 25 },
     { label: 'Gestión de fiados',        desc: 'Recuperación de fiados y cumplimiento de deudas',  icon: <Users className="w-4 h-4" />,      value: breakdown.gestionFiados,          max: 20 },
     { label: 'Nivel de endeudamiento',   desc: 'Relación entre tus deudas y tus ingresos',         icon: <Clock className="w-4 h-4" />,      value: breakdown.saludInventario,        max: 15 },
     { label: 'Historial financiero',     desc: 'Antigüedad y comportamiento financiero',            icon: <ShieldCheck className="w-4 h-4" />, value: breakdown.calidadDatos,          max: 10 },
+    ...(breakdown.hasExtracto ? [{ label: 'Respaldo bancario', desc: 'Verificación con extracto bancario', icon: <ArrowUpCircle className="w-4 h-4" />, value: breakdown.respaldoBancario, max: 20 }] : []),
   ], [breakdown]);
 
   // ─── SVG Gauge constants ───────────────────────────────────────────────────

@@ -1,13 +1,23 @@
 import { Sale, Expense, Debt } from '../types';
 
+// Minimal subset of ExtractoAnalysis needed for scoring (avoids importing pdfjs-dist)
+export interface ExtractoSummary {
+  totalIngresos: number;
+  totalGastos: number;
+  porcentajeVentas: number;
+  passwordUnlocked: boolean;
+}
+
 export interface ScoreBreakdown {
   consistenciaIngresos: number;  // 0–30
   capacidadPago: number;         // 0–25
   gestionFiados: number;         // 0–20
   saludInventario: number;       // 0–15
   calidadDatos: number;          // 0–10
-  scoreBase: number;             // 0–100
-  scoreFinal: number;            // 300–850
+  respaldoBancario: number;      // 0–20 (bonus por extracto bancario verificado)
+  hasExtracto: boolean;
+  scoreBase: number;             // 0–100 (solo factores app)
+  scoreFinal: number;            // 150–950
   hasEnoughData: boolean;
 }
 
@@ -189,11 +199,52 @@ function calcCalidadDatos(sales: Sale[], expenses: Expense[]): number {
   return clamp((ratioActividad * 0.6 + textQuality * 0.4) * 10, 0, 10);
 }
 
+// ─── Factor 6: Respaldo bancario (0–20, bonus por extracto verificado) ───────
+function calcRespaldoBancario(extractos: ExtractoSummary[]): number {
+  if (extractos.length === 0) return 0;
+
+  // Usar el extracto con más ingresos como referencia principal
+  const best = extractos.reduce((a, b) => a.totalIngresos > b.totalIngresos ? a : b);
+
+  // Sub-factor 1: Calidad de ingresos bancarios (0–10)
+  // ¿Qué % de los ingresos son cobros reales de ventas (QR / clientes)?
+  let factorIngresos = 0;
+  if (best.totalIngresos > 0) {
+    const pct = best.porcentajeVentas;
+    if (pct >= 60)     factorIngresos = 10;
+    else if (pct >= 30) factorIngresos = 5 + ((pct - 30) / 30) * 5;
+    else if (pct > 0)   factorIngresos = (pct / 30) * 5;
+    else                factorIngresos = 2; // tiene actividad bancaria aunque sin QR
+  }
+
+  // Sub-factor 2: Capacidad de ahorro bancaria (0–5)
+  let factorAhorro = 0;
+  if (best.totalIngresos > 0) {
+    const ratio = (best.totalIngresos - best.totalGastos) / best.totalIngresos;
+    if (ratio >= 0.4)       factorAhorro = 5;
+    else if (ratio >= 0.2)  factorAhorro = 2.5 + ((ratio - 0.2) / 0.2) * 2.5;
+    else if (ratio >= 0)    factorAhorro = (ratio / 0.2) * 2.5;
+  }
+
+  // Sub-factor 3: Credibilidad del documento (0–5)
+  // +2 si algún PDF estaba protegido con cédula (más auténtico)
+  // +1 por cada extracto adicional (más meses = más historial, máx 3)
+  const credPass  = extractos.some(e => e.passwordUnlocked) ? 2 : 0;
+  const credCount = Math.min(extractos.length, 3);
+  const factorCredibilidad = credPass + credCount;
+
+  return clamp(
+    Math.round((factorIngresos + factorAhorro + factorCredibilidad) * 10) / 10,
+    0, 20,
+  );
+}
+
 // ─── Función principal ────────────────────────────────────────────────────────
 export function calculateScore(
   sales: Sale[],
   expenses: Expense[],
   debts: Debt[],
+  extractos: ExtractoSummary[] = [],
 ): ScoreBreakdown {
   const totalRegistros = sales.length + expenses.length + debts.length;
   const hasEnoughData = totalRegistros >= 5;
@@ -201,18 +252,24 @@ export function calculateScore(
   const totalIngresos = sales.reduce((s, v) => s + v.total, 0);
 
   const consistenciaIngresos = Math.round(calcConsistencia(sales) * 10) / 10;
-  const capacidadPago = Math.round(calcCapacidadPago(sales, expenses) * 10) / 10;
-  const gestionFiados = Math.round(calcGestionFiados(debts, totalIngresos) * 10) / 10;
-  const saludInventario = Math.round(calcSaludInventario(sales, expenses) * 10) / 10;
-  const calidadDatos = Math.round(calcCalidadDatos(sales, expenses) * 10) / 10;
+  const capacidadPago        = Math.round(calcCapacidadPago(sales, expenses) * 10) / 10;
+  const gestionFiados        = Math.round(calcGestionFiados(debts, totalIngresos) * 10) / 10;
+  const saludInventario      = Math.round(calcSaludInventario(sales, expenses) * 10) / 10;
+  const calidadDatos         = Math.round(calcCalidadDatos(sales, expenses) * 10) / 10;
+  const respaldoBancario     = Math.round(calcRespaldoBancario(extractos) * 10) / 10;
 
   const scoreBase = clamp(
     consistenciaIngresos + capacidadPago + gestionFiados + saludInventario + calidadDatos,
-    0,
-    100,
+    0, 100,
   );
-  // Escala colombiana: 150–950 (DataCrédito / TransUnion)
-  const scoreFinal = clamp(Math.round(150 + scoreBase * 8), 150, 950);
+
+  // El extracto suma como bonus sobre el score base (no cambia scores existentes).
+  // Cada punto de respaldo vale lo mismo que los factores de la app (×8).
+  // El techo sigue siendo 950.
+  const scoreFinal = clamp(
+    Math.round(150 + scoreBase * 8 + respaldoBancario * 8),
+    150, 950,
+  );
 
   return {
     consistenciaIngresos,
@@ -220,6 +277,8 @@ export function calculateScore(
     gestionFiados,
     saludInventario,
     calidadDatos,
+    respaldoBancario,
+    hasExtracto: extractos.length > 0,
     scoreBase: Math.round(scoreBase * 10) / 10,
     scoreFinal,
     hasEnoughData,
