@@ -1,8 +1,12 @@
 {
   "functions": {
     "api/telegram.ts": { "maxDuration": 30 },
-    "api/whatsapp.ts": { "maxDuration": 30 }
+    "api/whatsapp.ts": { "maxDuration": 30 },
+    "api/notify.ts": { "maxDuration": 30 }
   },
+  "crons": [
+    { "path": "/api/notify", "schedule": "0 13 * * *" }
+  ],
   "rewrites": [
     { "source": "/((?!api/).*)", "destination": "/index.html" }
   ]
