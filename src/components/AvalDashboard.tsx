@@ -8,13 +8,11 @@ import {
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { analyzeExtracto, ExtractoAnalysis } from '../services/extractoService';
-import { Sale } from '../types';
 
 interface Props {
   isDarkMode: boolean;
   cedula: string;
   userName?: string;
-  sales: Sale[];
   onBack: () => void;
 }
 
@@ -133,20 +131,6 @@ const TIPO_LABEL: Record<string, string> = {
   otro:                   '⚪ Otro',
 };
 
-function NivelBadge({ nivel }: { nivel: 'alto' | 'medio' | 'bajo' }) {
-  const map = {
-    alto:  { label: 'Confianza ALTA',  cls: 'bg-green-500/15 text-green-600' },
-    medio: { label: 'Confianza MEDIA', cls: 'bg-yellow-500/15 text-yellow-600' },
-    bajo:  { label: 'Confianza BAJA',  cls: 'bg-red-500/15 text-red-500' },
-  };
-  const { label, cls } = map[nivel];
-  return (
-    <span className={cn('text-[10px] font-black uppercase tracking-widest px-2.5 py-1 rounded-full', cls)}>
-      {label}
-    </span>
-  );
-}
-
 function ScoreBar({ value, color }: { value: number; color: string }) {
   return (
     <div className="flex items-center gap-2 flex-1">
@@ -169,12 +153,13 @@ function AnalysisCard({ analysis, isDarkMode, text, muted }: {
 
   return (
     <div className={cn('rounded-xl p-4 space-y-4', isDarkMode ? 'bg-[#0D0D0D]' : 'bg-[#FDFBF0]')}>
-      <div className="flex items-center justify-between">
+      {/* Header */}
+      <div className="flex items-center gap-2">
+        <CheckCircle2 className="w-4 h-4 text-green-500 flex-shrink-0" />
         <div>
           <p className="text-xs font-black uppercase tracking-widest text-[#B8860B]">{label}</p>
-          <p className={cn('text-sm font-black mt-0.5', text)}>Análisis completado</p>
+          <p className={cn('text-sm font-black', text)}>Análisis completado</p>
         </div>
-        <NivelBadge nivel={analysis.nivel} />
       </div>
 
       {analysis.passwordUnlocked && (
@@ -184,47 +169,40 @@ function AnalysisCard({ analysis, isDarkMode, text, muted }: {
         </div>
       )}
 
+      {/* Ingresos vs Gastos */}
       <div className={cn('rounded-xl p-3 space-y-2.5', isDarkMode ? 'bg-white/5' : 'bg-white')}>
         <div className="flex justify-between items-center">
-          <span className={cn('text-xs', muted)}>Ingresos totales</span>
-          <span className={cn('text-sm font-black', text)}>{formatCOP(analysis.totalIngresos)}</span>
-        </div>
-        <div>
-          <div className="flex justify-between items-center mb-1">
-            <span className="text-xs font-bold text-green-600 flex items-center gap-1">
-              <TrendingUp className="w-3 h-3" />Ventas identificadas
-            </span>
-            <span className="text-sm font-black text-green-600">{formatCOP(analysis.ingresosVentas)}</span>
-          </div>
-          <ScoreBar value={analysis.porcentajeVentas} color="bg-green-500" />
-        </div>
-        <div>
-          <div className="flex justify-between items-center mb-1">
-            <span className={cn('text-xs font-bold flex items-center gap-1', muted)}>
-              <TrendingDown className="w-3 h-3" />Transferencias / otros
-            </span>
-            <span className={cn('text-sm font-black', muted)}>{formatCOP(analysis.ingresosTransferencias)}</span>
-          </div>
-          <ScoreBar value={100 - analysis.porcentajeVentas} color="bg-black/20" />
-        </div>
-      </div>
-
-      <div className={cn('rounded-xl p-3', isDarkMode ? 'bg-white/5' : 'bg-white')}>
-        <div className="flex justify-between items-center mb-1.5">
-          <span className={cn('text-xs font-bold', text)}>Cruce con Voz-Activa</span>
-          <span className={cn('text-xs font-black', analysis.consistenciaConApp >= 60 ? 'text-green-600' : analysis.consistenciaConApp >= 40 ? 'text-yellow-600' : 'text-red-500')}>
-            {analysis.consistenciaConApp}%
+          <span className="text-xs font-bold text-green-600 flex items-center gap-1">
+            <TrendingUp className="w-3 h-3" />Ingresos totales
           </span>
+          <span className="text-sm font-black text-green-600">{formatCOP(analysis.totalIngresos)}</span>
         </div>
-        <ScoreBar
-          value={analysis.consistenciaConApp}
-          color={analysis.consistenciaConApp >= 60 ? 'bg-[#B8860B]' : analysis.consistenciaConApp >= 40 ? 'bg-yellow-500' : 'bg-red-400'}
-        />
-        <p className={cn('text-[10px] mt-2 leading-snug', muted)}>
-          Días donde tus ingresos del extracto coinciden con tus ventas registradas en la app
-        </p>
+        <div className="flex justify-between items-center">
+          <span className={cn('text-xs font-bold flex items-center gap-1', 'text-red-500')}>
+            <TrendingDown className="w-3 h-3" />Gastos / retiros
+          </span>
+          <span className="text-sm font-black text-red-500">{formatCOP(analysis.totalGastos)}</span>
+        </div>
+        {analysis.totalIngresos > 0 && (
+          <div className="pt-1">
+            <div className="flex justify-between items-center mb-1">
+              <span className={cn('text-[10px]', muted)}>Cobros QR / ventas directas</span>
+              <span className={cn('text-[10px] font-black', muted)}>{analysis.porcentajeVentas}%</span>
+            </div>
+            <ScoreBar value={analysis.porcentajeVentas} color="bg-[#B8860B]" />
+          </div>
+        )}
       </div>
 
+      {/* Mini análisis IA */}
+      {analysis.miniAnalisis && (
+        <div className={cn('rounded-xl p-3 flex items-start gap-2.5', isDarkMode ? 'bg-white/5' : 'bg-white')}>
+          <Sparkles className="w-3.5 h-3.5 text-[#B8860B] flex-shrink-0 mt-0.5" />
+          <p className={cn('text-xs leading-relaxed', text)}>{analysis.miniAnalisis}</p>
+        </div>
+      )}
+
+      {/* Transacciones desplegables */}
       {analysis.transactions.length > 0 && (
         <div>
           <button
@@ -259,7 +237,7 @@ function AnalysisCard({ analysis, isDarkMode, text, muted }: {
   );
 }
 
-export const AvalDashboard = ({ isDarkMode, cedula, userName, sales, onBack }: Props) => {
+export const AvalDashboard = ({ isDarkMode, cedula, userName, onBack }: Props) => {
   const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
   const [isDragging, setIsDragging]       = useState(false);
   const [showTips, setShowTips]           = useState(false);
@@ -276,7 +254,7 @@ export const AvalDashboard = ({ isDarkMode, cedula, userName, sales, onBack }: P
 
   const processFile = async (file: File, id: string) => {
     try {
-      const analysis = await analyzeExtracto(file, sales, cedula);
+      const analysis = await analyzeExtracto(file, cedula);
       setUploadedFiles(prev => prev.map(f => f.id === id ? { ...f, status: 'analizado', analysis } : f));
     } catch (err: any) {
       setUploadedFiles(prev => prev.map(f => f.id === id ? { ...f, status: 'error', errorMsg: err.message } : f));

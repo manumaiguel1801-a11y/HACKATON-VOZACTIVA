@@ -1,6 +1,5 @@
 import { GoogleGenAI, Type } from '@google/genai';
 import * as pdfjsLib from 'pdfjs-dist';
-import { Sale } from '../types';
 
 // pdfjs worker — use the bundled legacy worker to avoid separate fetch
 pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
@@ -20,14 +19,12 @@ export interface ExtractoTransaction {
 export interface ExtractoAnalysis {
   entidad: string;
   totalIngresos: number;
+  totalGastos: number;
   ingresosVentas: number;
   ingresosTransferencias: number;
   porcentajeVentas: number;
   transactions: ExtractoTransaction[];
-  consistenciaConApp: number;
-  scoreGeneral: number;
-  nivel: 'alto' | 'medio' | 'bajo';
-  resumen: string;
+  miniAnalisis: string;
   passwordUnlocked: boolean;
 }
 
@@ -106,6 +103,7 @@ const SCHEMA = {
       esExtractoBancario: { type: Type.BOOLEAN },
       motivoRechazo:      { type: Type.STRING },
       entidad:            { type: Type.STRING },
+      miniAnalisis:       { type: Type.STRING },
       transactions: {
         type: Type.ARRAY,
         items: {
@@ -142,6 +140,7 @@ Si NO es extracto válido:
 → esExtractoBancario: false
 → motivoRechazo: describe qué tipo de documento es
 → transactions: []
+→ miniAnalisis: ""
 
 ─── PASO 2: EXTRACCIÓN (solo si es extracto válido) ───
 → esExtractoBancario: true
@@ -159,51 +158,12 @@ esVentaProbable = true: cobros QR, pagos de clientes, múltiples pagos pequeños
 esVentaProbable = false: nombre propio enviando dinero, montos redondos grandes, "préstamo", "ayuda"
 
 monto: entero en pesos colombianos, sin puntos ni $. Solo positivos.
-entidad: "nequi", "daviplata", "davivienda", "bancolombia" o "otro".`;
+entidad: "nequi", "daviplata", "davivienda", "bancolombia" o "otro".
 
-function toIsoDateKey(dateStr: string): string | null {
-  if (!dateStr) return null;
-  if (/^\d{4}-\d{2}-\d{2}/.test(dateStr)) return dateStr.substring(0, 10);
-  const parts = dateStr.split('/');
-  if (parts.length === 3)
-    return `${parts[2]}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}`;
-  return null;
-}
-
-function crossReferenceWithApp(transactions: ExtractoTransaction[], sales: Sale[]): number {
-  if (sales.length === 0) return 50;
-
-  const extractoByDay: Record<string, number> = {};
-  transactions
-    .filter(t => t.esVentaProbable && t.monto > 0)
-    .forEach(t => {
-      const key = toIsoDateKey(t.fecha);
-      if (key) extractoByDay[key] = (extractoByDay[key] || 0) + t.monto;
-    });
-
-  const days = Object.keys(extractoByDay);
-  if (days.length === 0) return 40;
-
-  const appByDay: Record<string, number> = {};
-  sales.forEach(s => {
-    try {
-      const d: Date = s.createdAt?.toDate ? s.createdAt.toDate() : new Date(s.createdAt);
-      const key = d.toISOString().split('T')[0];
-      appByDay[key] = (appByDay[key] || 0) + s.total;
-    } catch {}
-  });
-
-  const shared = days.filter(d => appByDay[d]);
-  if (shared.length === 0) return 40;
-
-  let matches = 0;
-  shared.forEach(d => {
-    const ratio = Math.min(extractoByDay[d], appByDay[d]) / Math.max(extractoByDay[d], appByDay[d]);
-    if (ratio >= 0.4) matches++;
-  });
-
-  return Math.round((matches / shared.length) * 100);
-}
+─── PASO 3: MINI ANÁLISIS (solo si es extracto válido) ───
+En el campo miniAnalisis escribe 2-3 oraciones cortas y directas sobre el comportamiento financiero del extracto.
+Incluye: total de ingresos vs gastos/retiros, si predominan cobros QR o transferencias, y algún patrón relevante (frecuencia, montos típicos).
+Usa cifras reales del extracto. Español colombiano directo, sin rodeos.`;
 
 async function blobToBase64(blob: Blob): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -214,7 +174,7 @@ async function blobToBase64(blob: Blob): Promise<string> {
   });
 }
 
-export async function analyzeExtracto(file: File, sales: Sale[], cedula = ''): Promise<ExtractoAnalysis> {
+export async function analyzeExtracto(file: File, cedula = ''): Promise<ExtractoAnalysis> {
   const ext = file.name.split('.').pop()?.toLowerCase();
   if (ext !== 'pdf') throw new Error('Solo se aceptan archivos PDF. Descarga el extracto en formato PDF desde tu banco.');
 
@@ -266,67 +226,48 @@ export async function analyzeExtracto(file: File, sales: Sale[], cedula = ''): P
   const transactions: ExtractoTransaction[] = (parsed.transactions ?? []).filter((t: any) => t.monto > 0);
 
   const ingresos               = transactions.filter(t => ['cobro_qr','transferencia_recibida','otro'].includes(t.tipo));
+  const salidas                = transactions.filter(t => ['transferencia_enviada','retiro','pago_servicio'].includes(t.tipo));
   const totalIngresos          = ingresos.reduce((s, t) => s + t.monto, 0);
+  const totalGastos            = salidas.reduce((s, t) => s + t.monto, 0);
   const ingresosVentas         = ingresos.filter(t => t.esVentaProbable).reduce((s, t) => s + t.monto, 0);
   const ingresosTransferencias = totalIngresos - ingresosVentas;
   const porcentajeVentas       = totalIngresos > 0 ? Math.round((ingresosVentas / totalIngresos) * 100) : 0;
-  const consistenciaConApp     = crossReferenceWithApp(transactions, sales);
-  const scoreGeneral           = Math.round(porcentajeVentas * 0.6 + consistenciaConApp * 0.4);
-  const nivel: 'alto' | 'medio' | 'bajo' = scoreGeneral >= 65 ? 'alto' : scoreGeneral >= 40 ? 'medio' : 'bajo';
-
-  const ENTIDAD_LABELS: Record<string, string> = {
-    nequi: 'Nequi', daviplata: 'Daviplata',
-    davivienda: 'Davivienda', bancolombia: 'Bancolombia',
-  };
-  const entidad = (parsed.entidad ?? 'otro').toLowerCase();
-  const label   = ENTIDAD_LABELS[entidad] ?? 'Extracto bancario';
+  const entidad                = (parsed.entidad ?? 'otro').toLowerCase();
 
   return {
     entidad,
     totalIngresos,
+    totalGastos,
     ingresosVentas,
     ingresosTransferencias,
     porcentajeVentas,
     transactions,
-    consistenciaConApp,
-    scoreGeneral,
-    nivel,
-    resumen: `El ${porcentajeVentas}% de los ingresos de ${label} corresponden a patrones de venta. Consistencia con Voz-Activa: ${consistenciaConApp}%.`,
+    miniAnalisis: parsed.miniAnalisis?.trim() ?? '',
     passwordUnlocked: wasLocked,
   };
 }
 
-const ENTIDAD_LABELS_EXPORT: Record<string, string> = {
-  nequi: 'Nequi', daviplata: 'Daviplata',
-  davivienda: 'Davivienda', bancolombia: 'Bancolombia',
-};
-
 export function buildAnalysis(
   transactions: ExtractoTransaction[],
   entidad: string,
-  sales: Sale[],
 ): ExtractoAnalysis {
-  const ingresos            = transactions.filter(t => !['transferencia_enviada','retiro'].includes(t.tipo));
-  const totalIngresos       = ingresos.reduce((s, t) => s + t.monto, 0);
-  const ingresosVentas      = ingresos.filter(t => t.esVentaProbable).reduce((s, t) => s + t.monto, 0);
+  const ingresos               = transactions.filter(t => !['transferencia_enviada','retiro','pago_servicio'].includes(t.tipo));
+  const salidas                = transactions.filter(t => ['transferencia_enviada','retiro','pago_servicio'].includes(t.tipo));
+  const totalIngresos          = ingresos.reduce((s, t) => s + t.monto, 0);
+  const totalGastos            = salidas.reduce((s, t) => s + t.monto, 0);
+  const ingresosVentas         = ingresos.filter(t => t.esVentaProbable).reduce((s, t) => s + t.monto, 0);
   const ingresosTransferencias = totalIngresos - ingresosVentas;
-  const porcentajeVentas    = totalIngresos > 0 ? Math.round((ingresosVentas / totalIngresos) * 100) : 0;
-  const consistenciaConApp  = crossReferenceWithApp(transactions, sales);
-  const scoreGeneral        = Math.round(porcentajeVentas * 0.6 + consistenciaConApp * 0.4);
-  const nivel: 'alto' | 'medio' | 'bajo' = scoreGeneral >= 65 ? 'alto' : scoreGeneral >= 40 ? 'medio' : 'bajo';
-  const label               = ENTIDAD_LABELS_EXPORT[entidad.toLowerCase()] ?? entidad;
+  const porcentajeVentas       = totalIngresos > 0 ? Math.round((ingresosVentas / totalIngresos) * 100) : 0;
 
   return {
     entidad: entidad.toLowerCase(),
     totalIngresos,
+    totalGastos,
     ingresosVentas,
     ingresosTransferencias,
     porcentajeVentas,
     transactions,
-    consistenciaConApp,
-    scoreGeneral,
-    nivel,
-    resumen: `El ${porcentajeVentas}% de los ingresos de ${label} son pagos directos verificados. Consistencia con Voz-Activa: ${consistenciaConApp}%.`,
+    miniAnalisis: '',
     passwordUnlocked: false,
   };
 }
