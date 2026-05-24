@@ -192,7 +192,7 @@ Ejemplo — "gasté 70k en el casino, le debo 1M al banco y Laura me debe 400k":
 → data: {type:"gasto", amount:70000, concept:"Casino"}
 → movements: [{type:"deuda-debo", amount:1000000, concept:"Deuda banco", debtorName:"banco"}, {type:"deuda-me-deben", amount:400000, concept:"Deuda Laura", debtorName:"Laura"}]`;
 
-const MODELS = ['gemini-2.5-flash', 'gemini-2.0-flash'];
+const MODELS = ['gemini-2.5-flash', 'gemini-2.5-flash-lite'];
 
 const MOVEMENT_SCHEMA = {
   type: Type.OBJECT,
@@ -223,6 +223,7 @@ const MOVEMENT_SCHEMA = {
 const SCHEMA_CONFIG = {
   systemInstruction: SYSTEM_INSTRUCTION,
   responseMimeType: 'application/json',
+  thinkingConfig: { thinkingBudget: 0 },
   responseSchema: {
     type: Type.OBJECT,
     properties: {

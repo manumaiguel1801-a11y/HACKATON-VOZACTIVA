@@ -72,6 +72,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return;
     }
 
+    if (/^(\/limpiar|limpiar|\/reset|reset|\/reiniciar|reiniciar)$/i.test(text)) {
+      const limpiarSnap = await db.collection('users').where('whatsappPhone', '==', from).limit(1).get();
+      if (!limpiarSnap.empty) {
+        await limpiarSnap.docs[0].ref.update({
+          whatsappHistory: FieldValue.delete(),
+          whatsappPendingState: FieldValue.delete(),
+        });
+      }
+      await sendWhatsApp(from, '✅ Conversación reiniciada. Ya puedes registrar normalmente.\n\nEjemplo: _"vendí 3 jugos a 3000"_');
+      return;
+    }
+
     const snap = await db.collection('users')
       .where('whatsappPhone', '==', from)
       .limit(1)
