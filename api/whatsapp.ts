@@ -134,9 +134,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       });
     }
 
-  } catch (err) {
+  } catch (err: any) {
     console.error('[whatsapp] Error:', err);
-    try { await sendWhatsApp(from, '⚠️ Hubo un error. Intenta de nuevo.'); } catch (_) { /* ignore */ }
+    const errMsg = err?.message ?? String(err);
+    const errStack = (err?.stack ?? '').split('\n').slice(0, 4).join('\n');
+    const debugBlock = `[DEBUG WHATSAPP HANDLER]\n• error: ${errMsg}\n• stack:\n${errStack}`;
+    try {
+      await sendWhatsApp(from, `⚠️ Hubo un error. Intenta de nuevo.\n\n${debugBlock}`);
+    } catch (_) { /* ignore */ }
   } finally {
     res.status(200).end();
   }
