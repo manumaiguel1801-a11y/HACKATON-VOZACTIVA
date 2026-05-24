@@ -4,11 +4,11 @@ import { Sale, Expense } from '../types';
 export type ReportPeriod = '1d' | '7d' | '14d' | '21d' | 'mes';
 
 export const PERIOD_CONFIG: Record<ReportPeriod, { label: string; sub: string; days: number | null }> = {
-  '1d':  { label: 'Hoy',          sub: 'Solo hoy',         days: 1 },
-  '7d':  { label: 'Esta semana',  sub: 'Últimos 7 días',   days: 7 },
-  '14d': { label: '2 semanas',    sub: 'Últimos 14 días',  days: 14 },
-  '21d': { label: '3 semanas',    sub: 'Últimos 21 días',  days: 21 },
-  'mes': { label: 'Este mes',     sub: 'Mes en curso',     days: null },
+  '1d': { label: 'Hoy', sub: 'Solo hoy', days: 1 },
+  '7d': { label: 'Esta semana', sub: 'Últimos 7 días', days: 7 },
+  '14d': { label: '2 semanas', sub: 'Últimos 14 días', days: 14 },
+  '21d': { label: '3 semanas', sub: 'Últimos 21 días', days: 21 },
+  'mes': { label: 'Este mes', sub: 'Mes en curso', days: null },
 };
 
 export interface ReportSection {
@@ -23,11 +23,11 @@ export interface ParsedReport {
 }
 
 const SECTION_MAP: { key: string; emoji: string; title: string }[] = [
-  { key: 'DESCRIPCIÓN DEL NEGOCIO',        emoji: '🧾', title: 'Descripción del negocio' },
-  { key: 'RESUMEN FINANCIERO',              emoji: '💰', title: 'Resumen financiero' },
-  { key: 'ANÁLISIS INTELIGENTE',            emoji: '📊', title: 'Análisis inteligente' },
-  { key: 'RECOMENDACIONES PERSONALIZADAS',  emoji: '🎯', title: 'Recomendaciones' },
-  { key: 'CONCLUSIÓN',                      emoji: '📌', title: 'Conclusión' },
+  { key: 'DESCRIPCIÓN DEL NEGOCIO', emoji: '🧾', title: 'Descripción del negocio' },
+  { key: 'RESUMEN FINANCIERO', emoji: '💰', title: 'Resumen financiero' },
+  { key: 'ANÁLISIS INTELIGENTE', emoji: '📊', title: 'Análisis inteligente' },
+  { key: 'RECOMENDACIONES PERSONALIZADAS', emoji: '🎯', title: 'Recomendaciones' },
+  { key: 'CONCLUSIÓN', emoji: '📌', title: 'Conclusión' },
 ];
 
 export function parseReport(raw: string): ParsedReport {
@@ -169,9 +169,8 @@ Una sola frase clara y contundente sobre el estado del negocio.
 }
 
 const REPORT_MODELS = [
+  'gemini-2.5-flash',
   'gemini-2.0-flash',
-  'gemini-2.0-flash-exp',
-  'gemini-1.5-flash',
 ];
 
 export async function generateFinancialReport(
