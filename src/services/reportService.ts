@@ -186,15 +186,13 @@ export async function generateFinancialReport(
   const client = new GoogleGenAI({ apiKey: key });
   const prompt = buildPrompt(sales, expenses, period, userName);
 
+  const contents = [{ role: 'user', parts: [{ text: prompt }] }];
+
   for (const model of REPORT_MODELS) {
     try {
-      const response = await client.models.generateContent({
-        model,
-        contents: [{ role: 'user' as const, parts: [{ text: prompt }] }],
-        config: { responseMimeType: 'text/plain' },
-      });
-      const raw = response.text ?? '';
-      if (!raw.trim()) continue;
+      const response = await client.models.generateContent({ model, contents } as any);
+      const raw = (response.text ?? '').trim();
+      if (!raw) continue;
       return parseReport(raw);
     } catch (err: any) {
       console.warn(`[Report] ${model} falló:`, err?.message ?? err);
