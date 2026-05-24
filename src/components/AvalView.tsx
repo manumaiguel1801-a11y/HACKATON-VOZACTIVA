@@ -86,6 +86,7 @@ export const AvalView = ({ isDarkMode, userId, prefillCedula = '', profileBirthD
         isDarkMode={isDarkMode}
         cedula={verifiedCedula}
         userName={verifiedName}
+        userId={userId}
         onBack={() => setStep('info')}
       />
     );

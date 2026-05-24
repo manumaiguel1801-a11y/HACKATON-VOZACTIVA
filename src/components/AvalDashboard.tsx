@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   ShieldCheck, FileText, Upload, CheckCircle2,
   Lock, BarChart3, Building2, X,
@@ -6,6 +6,8 @@ import {
   TrendingUp, TrendingDown, ChevronDown, ChevronUp, Smartphone,
   Info, LogOut,
 } from 'lucide-react';
+import { collection, addDoc, getDocs, deleteDoc, doc, serverTimestamp, query, orderBy } from 'firebase/firestore';
+import { db } from '../firebase';
 import { cn } from '../lib/utils';
 import { analyzeExtracto, ExtractoAnalysis } from '../services/extractoService';
 
@@ -13,11 +15,13 @@ interface Props {
   isDarkMode: boolean;
   cedula: string;
   userName?: string;
+  userId: string;
   onBack: () => void;
 }
 
 interface UploadedFile {
   id: string;
+  docId?: string;
   name: string;
   size: string;
   status: 'analizando' | 'analizado' | 'error';
@@ -237,13 +241,46 @@ function AnalysisCard({ analysis, isDarkMode, text, muted }: {
   );
 }
 
-export const AvalDashboard = ({ isDarkMode, cedula, userName, onBack }: Props) => {
+export const AvalDashboard = ({ isDarkMode, cedula, userName, userId, onBack }: Props) => {
   const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
   const [isDragging, setIsDragging]       = useState(false);
   const [showTips, setShowTips]           = useState(false);
   const [showCloseModal, setShowCloseModal] = useState(false);
   const [openBank, setOpenBank]           = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Cargar análisis guardados al montar
+  useEffect(() => {
+    const load = async () => {
+      try {
+        const col = collection(db, 'users', userId, 'extractos');
+        const snap = await getDocs(query(col, orderBy('analyzedAt', 'desc')));
+        const loaded: UploadedFile[] = snap.docs.map(d => {
+          const data = d.data();
+          return {
+            id: d.id,
+            docId: d.id,
+            name: data.fileName ?? 'extracto.pdf',
+            size: data.fileSize ?? '',
+            status: 'analizado' as const,
+            analysis: {
+              entidad:               data.entidad               ?? 'otro',
+              totalIngresos:         data.totalIngresos         ?? 0,
+              totalGastos:           data.totalGastos           ?? 0,
+              ingresosVentas:        data.ingresosVentas        ?? 0,
+              ingresosTransferencias:data.ingresosTransferencias?? 0,
+              porcentajeVentas:      data.porcentajeVentas      ?? 0,
+              transactions:          data.transactions          ?? [],
+              miniAnalisis:          data.miniAnalisis          ?? '',
+              passwordUnlocked:      data.passwordUnlocked      ?? false,
+            },
+          };
+        });
+        setUploadedFiles(loaded);
+      } catch { /* silencioso si no hay datos */ }
+    };
+    load();
+  }, [userId]);
 
   const card  = cn('rounded-2xl p-5', isDarkMode ? 'bg-[#1A1A1A]' : 'bg-white');
   const muted = isDarkMode ? 'text-white/40' : 'text-black/40';
@@ -255,7 +292,25 @@ export const AvalDashboard = ({ isDarkMode, cedula, userName, onBack }: Props) =
   const processFile = async (file: File, id: string) => {
     try {
       const analysis = await analyzeExtracto(file, cedula);
-      setUploadedFiles(prev => prev.map(f => f.id === id ? { ...f, status: 'analizado', analysis } : f));
+      // Guardar en Firestore
+      const col = collection(db, 'users', userId, 'extractos');
+      const docRef = await addDoc(col, {
+        fileName:              file.name,
+        fileSize:              formatBytes(file.size),
+        analyzedAt:            serverTimestamp(),
+        entidad:               analysis.entidad,
+        totalIngresos:         analysis.totalIngresos,
+        totalGastos:           analysis.totalGastos,
+        ingresosVentas:        analysis.ingresosVentas,
+        ingresosTransferencias:analysis.ingresosTransferencias,
+        porcentajeVentas:      analysis.porcentajeVentas,
+        transactions:          analysis.transactions,
+        miniAnalisis:          analysis.miniAnalisis,
+        passwordUnlocked:      analysis.passwordUnlocked,
+      });
+      setUploadedFiles(prev => prev.map(f =>
+        f.id === id ? { ...f, status: 'analizado', analysis, docId: docRef.id } : f,
+      ));
     } catch (err: any) {
       setUploadedFiles(prev => prev.map(f => f.id === id ? { ...f, status: 'error', errorMsg: err.message } : f));
     }
@@ -270,7 +325,13 @@ export const AvalDashboard = ({ isDarkMode, cedula, userName, onBack }: Props) =
     });
   };
 
-  const removeFile = (id: string) => setUploadedFiles(prev => prev.filter(f => f.id !== id));
+  const removeFile = async (id: string) => {
+    const file = uploadedFiles.find(f => f.id === id);
+    if (file?.docId) {
+      try { await deleteDoc(doc(db, 'users', userId, 'extractos', file.docId)); } catch { /* ignora */ }
+    }
+    setUploadedFiles(prev => prev.filter(f => f.id !== id));
+  };
 
   return (
     <div className="space-y-5 pb-10 animate-in fade-in slide-in-from-bottom-4 duration-500">
