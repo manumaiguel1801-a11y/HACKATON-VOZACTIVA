@@ -15,6 +15,7 @@ import {
   LogOut,
   X,
   FileText,
+  ShieldCheck,
 } from 'lucide-react';
 import { signOut } from 'firebase/auth';
 import { auth } from '../firebase';
@@ -69,13 +70,14 @@ export const Layout = ({
     }
   }, []);
 
-  const navItems: { tab: Tab; icon: React.ReactNode; label: string }[] = [
-    { tab: 'inicio',     icon: <Home />,      label: 'Inicio' },
-    { tab: 'finanzas',   icon: <TrendingUp />, label: 'Finanzas' },
-    { tab: 'reporte',    icon: <FileText />,   label: 'Reporte' },
-    { tab: 'camara',     icon: <Users />,      label: 'Deudas' },
-    { tab: 'inventario', icon: <Package />,    label: 'Inventario' },
-    { tab: 'pasaporte',  icon: <Wallet />,     label: 'Pasaporte' },
+  const navItems: { tab: Tab; icon: React.ReactNode; label: string; special?: boolean }[] = [
+    { tab: 'inicio',     icon: <Home />,        label: 'Inicio' },
+    { tab: 'finanzas',   icon: <TrendingUp />,  label: 'Finanzas' },
+    { tab: 'reporte',    icon: <FileText />,    label: 'Reporte' },
+    { tab: 'camara',     icon: <Users />,       label: 'Deudas' },
+    { tab: 'inventario', icon: <Package />,     label: 'Inventario' },
+    { tab: 'pasaporte',  icon: <Wallet />,      label: 'Pasaporte' },
+    { tab: 'aval',       icon: <ShieldCheck />, label: 'Mi Aval', special: true },
   ];
 
   return (
@@ -153,7 +155,7 @@ export const Layout = ({
 
         {/* Nav items */}
         <nav className="flex-1 px-3 py-4 space-y-1">
-          {navItems.map(({ tab, icon, label }) => (
+          {navItems.map(({ tab, icon, label, special }) => (
             <React.Fragment key={tab}>
               <SidebarButton
                 active={activeTab === tab}
@@ -161,6 +163,7 @@ export const Layout = ({
                 icon={icon}
                 label={label}
                 isDarkMode={isDarkMode}
+                special={special}
               />
             </React.Fragment>
           ))}
@@ -403,30 +406,41 @@ const SidebarButton = ({
   icon,
   label,
   isDarkMode,
+  special,
 }: {
   active: boolean;
   onClick: () => void;
   icon: React.ReactNode;
   label: string;
   isDarkMode: boolean;
+  special?: boolean;
 }) => (
   <button
     onClick={onClick}
     className={cn(
       'w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-bold transition-all duration-200',
-      active
+      special && !active
         ? isDarkMode
-          ? 'bg-[#FFD700]/10 text-[#FFD700]'
-          : 'bg-[#FFD700]/20 text-[#B8860B]'
-        : isDarkMode
-          ? 'text-white/50 hover:bg-white/5 hover:text-white/80'
-          : 'text-black/50 hover:bg-black/5 hover:text-black/80'
+          ? 'bg-[#B8860B]/10 text-[#FFD700] hover:bg-[#B8860B]/20'
+          : 'bg-[#B8860B]/10 text-[#B8860B] hover:bg-[#B8860B]/15'
+        : active
+          ? isDarkMode
+            ? 'bg-[#FFD700]/10 text-[#FFD700]'
+            : 'bg-[#FFD700]/20 text-[#B8860B]'
+          : isDarkMode
+            ? 'text-white/50 hover:bg-white/5 hover:text-white/80'
+            : 'text-black/50 hover:bg-black/5 hover:text-black/80'
     )}
   >
     {React.cloneElement(icon as React.ReactElement, {
-      className: cn('w-5 h-5 flex-shrink-0', active && 'fill-current'),
+      className: cn('w-5 h-5 flex-shrink-0', (active || special) && 'fill-current'),
     })}
     {label}
+    {special && !active && (
+      <span className="ml-auto text-[9px] font-black uppercase tracking-widest bg-[#B8860B] text-white px-1.5 py-0.5 rounded-full">
+        Nuevo
+      </span>
+    )}
   </button>
 );
 

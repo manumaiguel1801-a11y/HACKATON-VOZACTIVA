@@ -12,6 +12,7 @@ import { ReportView } from './components/ReportView';
 import { CameraView } from './components/CameraView';
 import { InventorySalesView } from './components/InventorySalesView';
 import { PassportView } from './components/PassportView';
+import { AvalView } from './components/AvalView';
 import { ProfileView } from './components/ProfileView';
 import { Auth } from './components/Auth';
 import { VerificationView } from './components/VerificationView';
@@ -160,6 +161,11 @@ export default function App() {
         {activeTab === 'pasaporte' && (
           <motion.div key="passport" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }}>
             <PassportView isDarkMode={isDarkMode} sales={sales} expenses={expenses} debts={debts} profile={profile} userId={user.uid} />
+          </motion.div>
+        )}
+        {activeTab === 'aval' && (
+          <motion.div key="aval" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }}>
+            <AvalView isDarkMode={isDarkMode} onStartVerification={() => {}} />
           </motion.div>
         )}
         {activeTab === 'perfil' && profile && (
