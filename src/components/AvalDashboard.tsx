@@ -271,20 +271,37 @@ export const AvalDashboard = ({ isDarkMode, cedula, userName, sales, onBack }: P
 
       // Get widget access token from our server
       const tokenResp = await fetch('/api/belvo-token', { method: 'POST' });
-      if (!tokenResp.ok) {
-        const err = await tokenResp.json();
-        throw new Error(err.error ?? 'No se pudo iniciar la conexión');
+      const rawText = await tokenResp.text();
+
+      if (!rawText) {
+        throw new Error(
+          'Las funciones de servidor no están disponibles. ' +
+          'Para probar localmente ejecutá "vercel dev" en vez de "npm run dev". ' +
+          'En producción asegurate de tener BELVO_SECRET_ID y BELVO_SECRET_PASSWORD en las variables de entorno de Vercel.'
+        );
       }
-      const { access } = await tokenResp.json();
+
+      let tokenData: any;
+      try { tokenData = JSON.parse(rawText); }
+      catch { throw new Error('Respuesta inesperada del servidor. Verificá el despliegue en Vercel.'); }
+
+      if (!tokenResp.ok) {
+        throw new Error(tokenData?.error ?? 'No se pudo iniciar la conexión con Belvo.');
+      }
+
+      const { access } = tokenData;
+      if (!access) throw new Error('No se recibió token de Belvo. Verificá las credenciales en Vercel.');
 
       // Open Belvo widget
       (window as any).belvoSDK.createWidget(access, {
         callback: async (linkId: string, institution: string) => {
           setBelvoStatus('fetching');
           try {
-            const txResp = await fetch(`/api/belvo-transactions?linkId=${linkId}`);
-            if (!txResp.ok) throw new Error('Error obteniendo transacciones');
-            const data = await txResp.json();
+            const txResp  = await fetch(`/api/belvo-transactions?linkId=${linkId}`);
+            const txText  = await txResp.text();
+            if (!txText) throw new Error('Sin respuesta al obtener transacciones.');
+            const data    = JSON.parse(txText);
+            if (!txResp.ok) throw new Error(data?.error ?? 'Error obteniendo transacciones');
 
             const analysis = buildAnalysis(
               data.transactions as ExtractoTransaction[],
