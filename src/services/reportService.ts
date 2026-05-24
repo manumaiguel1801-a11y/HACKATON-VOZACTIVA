@@ -1,4 +1,4 @@
-import { GoogleGenAI, Type } from '@google/genai';
+import Anthropic from '@anthropic-ai/sdk';
 import { Sale, Expense } from '../types';
 
 export type ReportPeriod = 'hoy' | '7d' | '14d' | '21d' | 'mes' | '3m' | '6m' | 'all';
@@ -199,101 +199,180 @@ export function filterByPeriod(sales: Sale[], expenses: Expense[], period: Repor
   };
 }
 
-const AI_CONFIG = {
-  responseMimeType: 'application/json',
-  responseSchema: {
-    type: Type.OBJECT,
-    properties: {
-      descripcion:     { type: Type.STRING },
-      insights: {
-        type: Type.ARRAY,
-        items: {
-          type: Type.OBJECT,
-          properties: { titulo: { type: Type.STRING }, texto: { type: Type.STRING } },
-          required: ['titulo', 'texto'],
-        },
-      },
-      recomendaciones: {
-        type: Type.ARRAY,
-        items: {
-          type: Type.OBJECT,
-          properties: { titulo: { type: Type.STRING }, texto: { type: Type.STRING } },
-          required: ['titulo', 'texto'],
-        },
-      },
-      conclusion: { type: Type.STRING },
-    },
-    required: ['descripcion', 'insights', 'recomendaciones', 'conclusion'],
+// ─── Agent tools ──────────────────────────────────────────────────────────────
+
+const AGENT_TOOLS: Anthropic.Tool[] = [
+  {
+    name: 'get_period_metrics',
+    description: 'Obtiene ingresos, gastos, utilidad neta, margen y número de transacciones del período.',
+    input_schema: { type: 'object' as const, properties: {} },
   },
+  {
+    name: 'compare_with_previous_period',
+    description: 'Compara el período actual con el anterior de la misma duración. Útil para detectar crecimiento o caída.',
+    input_schema: { type: 'object' as const, properties: {} },
+  },
+  {
+    name: 'get_expense_breakdown',
+    description: 'Desglose de gastos por categoría ordenado de mayor a menor con porcentaje del total.',
+    input_schema: { type: 'object' as const, properties: {} },
+  },
+  {
+    name: 'get_sales_trend',
+    description: 'Tendencia de ventas: mejor y peor día de la semana, promedio diario y días sin actividad.',
+    input_schema: { type: 'object' as const, properties: {} },
+  },
+];
+
+const STEP_LABELS: Record<string, string> = {
+  get_period_metrics:          'Calculando métricas del período...',
+  compare_with_previous_period:'Comparando con período anterior...',
+  get_expense_breakdown:       'Analizando distribución de gastos...',
+  get_sales_trend:             'Detectando tendencias de ventas...',
 };
-
-function buildPrompt(
-  metrics: ParsedReport['metrics'],
-  pieData: PieSlice[],
-  bestDay: { name: string; amount: number } | null,
-  periodoLabel: string,
-  userName?: string,
-): string {
-  const fmt = (v: number) => `$${v.toLocaleString('es-CO')}`;
-  const gastosPie = pieData.map(p => `${p.name}: ${p.value}%`).join(', ') || 'Sin datos';
-  return `Eres un analista financiero experto en pequeños negocios informales latinoamericanos.
-
-Analiza estos datos reales y genera un reporte financiero util en español.
-
-DATOS DEL PERIODO: ${periodoLabel}
-- Negocio: ${userName ? `Negocio de ${userName}` : 'Mi Negocio'}
-- Ingresos: ${fmt(metrics.ingresos)}
-- Gastos: ${fmt(metrics.gastos)}
-- Utilidad neta: ${fmt(metrics.utilidad)}
-- Transacciones: ${metrics.transacciones}
-- Distribucion de gastos: ${gastosPie}
-- Mejor dia de ventas: ${bestDay ? `${bestDay.name} con ${fmt(bestDay.amount)}` : 'Sin datos suficientes'}
-
-Devuelve JSON con estos campos:
-- "descripcion": 2 oraciones describiendo el negocio y su comportamiento en el periodo
-- "insights": exactamente 4 objetos {titulo, texto} con hallazgos clave (mezcla positivos y negativos)
-- "recomendaciones": exactamente 4 objetos {titulo, texto} con acciones concretas basadas en los numeros reales
-- "conclusion": una sola oracion contundente sobre el estado actual del negocio
-
-REGLAS: usa numeros reales del reporte, no inventes datos, no uses markdown (sin asteriscos, hashtags ni guiones decorativos), escribe en texto plano, se directo y concreto.`;
-}
 
 export async function generateFinancialReport(
   sales: Sale[],
   expenses: Expense[],
   period: ReportPeriod,
   userName?: string,
+  onStep?: (step: string) => void,
 ): Promise<ParsedReport> {
-  const key = process.env.GEMINI_API_KEY;
-  if (!key) throw new Error('No hay GEMINI_API_KEY configurada');
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) throw new Error('No hay ANTHROPIC_API_KEY configurada. Agrégala en .env.local');
 
   const { start, label: periodoLabel } = getDateRange(period);
-  const filteredSales    = sales.filter(s => getSaleDate(s) >= start);
-  const filteredExpenses = expenses.filter(e => getExpenseDate(e) >= start);
-
-  const metrics = {
-    ingresos:      filteredSales.reduce((s, x) => s + x.total, 0),
-    gastos:        filteredExpenses.reduce((s, x) => s + x.amount, 0),
-    utilidad:      0,
-    transacciones: filteredSales.length + filteredExpenses.length,
-  };
-  metrics.utilidad = metrics.ingresos - metrics.gastos;
+  const fSales    = sales.filter(s => getSaleDate(s) >= start);
+  const fExpenses = expenses.filter(e => getExpenseDate(e) >= start);
 
   const chartData = computeChartData(sales, expenses, start, period);
   const pieData   = computePieData(expenses, start);
   const bestDay   = computeBestDay(sales, start);
 
-  const client   = new GoogleGenAI({ apiKey: key });
-  const prompt   = buildPrompt(metrics, pieData, bestDay, periodoLabel, userName);
-  const contents = [{ role: 'user', parts: [{ text: prompt }] }];
+  // ── Tool handlers ────────────────────────────────────────────────────────
+  function runTool(name: string): unknown {
+    if (name === 'get_period_metrics') {
+      const ingresos      = fSales.reduce((s, x) => s + x.total, 0);
+      const gastos        = fExpenses.reduce((s, x) => s + x.amount, 0);
+      return {
+        ingresos, gastos,
+        utilidad:      ingresos - gastos,
+        transacciones: fSales.length + fExpenses.length,
+        margen_pct:    ingresos > 0 ? Math.round(((ingresos - gastos) / ingresos) * 100) : 0,
+      };
+    }
 
-  for (const model of ['gemini-2.5-flash', 'gemini-2.0-flash']) {
-    try {
-      const response = await client.models.generateContent({ model, contents, config: AI_CONFIG } as any);
-      const ai = JSON.parse(response.text ?? '{}');
+    if (name === 'compare_with_previous_period') {
+      const days = PERIOD_CONFIG[period].days;
+      if (!days) return { disponible: false, motivo: 'El período seleccionado no tiene duración fija para comparar' };
+
+      const prevEnd   = new Date(start);
+      const prevStart = new Date(start.getTime() - days * 86_400_000);
+      const pSales    = sales.filter(s => { const d = getSaleDate(s);    return d >= prevStart && d < prevEnd; });
+      const pExpenses = expenses.filter(e => { const d = getExpenseDate(e); return d >= prevStart && d < prevEnd; });
+      const prevIngr  = pSales.reduce((s, x) => s + x.total, 0);
+      const prevGast  = pExpenses.reduce((s, x) => s + x.amount, 0);
+      const curIngr   = fSales.reduce((s, x) => s + x.total, 0);
+      const curGast   = fExpenses.reduce((s, x) => s + x.amount, 0);
+      return {
+        disponible:              true,
+        ingresos_anterior:       prevIngr,
+        gastos_anterior:         prevGast,
+        variacion_ingresos_pct:  prevIngr > 0 ? Math.round(((curIngr - prevIngr) / prevIngr) * 100) : null,
+        variacion_gastos_pct:    prevGast > 0 ? Math.round(((curGast - prevGast) / prevGast) * 100) : null,
+      };
+    }
+
+    if (name === 'get_expense_breakdown') {
+      const map = new Map<string, number>();
+      fExpenses.forEach(e => map.set(e.concept, (map.get(e.concept) ?? 0) + e.amount));
+      const total = [...map.values()].reduce((a, b) => a + b, 0);
+      return {
+        total_gastos: total,
+        categorias: [...map.entries()]
+          .sort((a, b) => b[1] - a[1])
+          .slice(0, 6)
+          .map(([nombre, monto]) => ({ nombre, monto, pct: total > 0 ? Math.round((monto / total) * 100) : 0 })),
+      };
+    }
+
+    if (name === 'get_sales_trend') {
+      const dayMap = new Map<string, number>();
+      fSales.forEach(s => {
+        const key = DAY_NAMES[getSaleDate(s).getDay()];
+        dayMap.set(key, (dayMap.get(key) ?? 0) + s.total);
+      });
+      const sorted       = [...dayMap.entries()].sort((a, b) => b[1] - a[1]);
+      const totalDays    = Math.max(1, Math.ceil((Date.now() - start.getTime()) / 86_400_000));
+      const daysWithSales = new Set(fSales.map(s => getSaleDate(s).toDateString())).size;
+      const totalIngr    = fSales.reduce((s, x) => s + x.total, 0);
+      return {
+        mejor_dia:       sorted[0]                  ? { dia: sorted[0][0],                  monto: sorted[0][1] }                  : null,
+        peor_dia:        sorted[sorted.length - 1]  ? { dia: sorted[sorted.length - 1][0],  monto: sorted[sorted.length - 1][1] }  : null,
+        dias_con_ventas:  daysWithSales,
+        dias_sin_ventas:  totalDays - daysWithSales,
+        promedio_diario:  daysWithSales > 0 ? Math.round(totalIngr / daysWithSales) : 0,
+      };
+    }
+
+    return { error: 'Herramienta no encontrada' };
+  }
+
+  // ── Agent loop ────────────────────────────────────────────────────────────
+  const client = new Anthropic({ apiKey, dangerouslyAllowBrowser: true });
+
+  const system = `Eres un analista financiero experto en pequeños negocios informales colombianos.
+Analiza los datos del negocio${userName ? ` de ${userName}` : ''} para el período: ${periodoLabel}.
+Usa las herramientas disponibles para recopilar todos los datos que necesites.
+Cuando tengas suficiente información, responde ÚNICAMENTE con un JSON válido con esta estructura:
+{
+  "descripcion": "2 oraciones sobre el negocio y su comportamiento en el período",
+  "insights": [
+    {"titulo":"...","texto":"..."},
+    {"titulo":"...","texto":"..."},
+    {"titulo":"...","texto":"..."},
+    {"titulo":"...","texto":"..."}
+  ],
+  "recomendaciones": [
+    {"titulo":"...","texto":"..."},
+    {"titulo":"...","texto":"..."},
+    {"titulo":"...","texto":"..."},
+    {"titulo":"...","texto":"..."}
+  ],
+  "conclusion": "Una sola oración contundente sobre el estado del negocio"
+}
+REGLAS: usa cifras reales, sin markdown, sin asteriscos, texto plano, español colombiano directo.`;
+
+  const messages: Anthropic.MessageParam[] = [
+    { role: 'user', content: 'Genera el reporte financiero completo.' },
+  ];
+
+  onStep?.('Iniciando análisis del negocio...');
+
+  for (let i = 0; i < 10; i++) {
+    const resp = await client.messages.create({
+      model:      'claude-haiku-4-5-20251001',
+      max_tokens: 4096,
+      system,
+      tools:      AGENT_TOOLS,
+      messages,
+    });
+
+    messages.push({ role: 'assistant', content: resp.content });
+
+    if (resp.stop_reason === 'end_turn') {
+      onStep?.('Construyendo reporte...');
+      const text = (resp.content.find(b => b.type === 'text') as Anthropic.TextBlock | undefined)?.text ?? '';
+      const match = text.match(/\{[\s\S]*\}/);
+      if (!match) throw new Error('El agente no devolvió un JSON válido. Intenta de nuevo.');
+
+      const ai      = JSON.parse(match[0]);
+      const ingr    = fSales.reduce((s, x) => s + x.total, 0);
+      const gast    = fExpenses.reduce((s, x) => s + x.amount, 0);
+
       return {
         periodoLabel,
-        metrics,
+        metrics: { ingresos: ingr, gastos: gast, utilidad: ingr - gast, transacciones: fSales.length + fExpenses.length },
         chartData,
         pieData,
         bestDay,
@@ -302,9 +381,17 @@ export async function generateFinancialReport(
         recomendaciones: ai.recomendaciones ?? [],
         conclusion:      ai.conclusion      ?? '',
       };
-    } catch (err: any) {
-      console.warn(`[Report] ${model} fallo:`, err?.message ?? err);
+    }
+
+    if (resp.stop_reason === 'tool_use') {
+      const toolBlocks = resp.content.filter((b): b is Anthropic.ToolUseBlock => b.type === 'tool_use');
+      const results: Anthropic.ToolResultBlockParam[] = toolBlocks.map(b => {
+        onStep?.(STEP_LABELS[b.name] ?? `Ejecutando ${b.name}...`);
+        return { type: 'tool_result', tool_use_id: b.id, content: JSON.stringify(runTool(b.name)) };
+      });
+      messages.push({ role: 'user', content: results });
     }
   }
-  throw new Error('No se pudo generar el reporte. Intenta de nuevo.');
+
+  throw new Error('El agente no completó el análisis. Intenta de nuevo.');
 }

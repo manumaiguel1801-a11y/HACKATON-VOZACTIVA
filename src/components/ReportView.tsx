@@ -346,6 +346,7 @@ function exportToPDF(
 export const ReportView: React.FC<Props> = ({ isDarkMode, sales, expenses, userName }) => {
   const [period, setPeriod]           = useState<ReportPeriod>('7d');
   const [loading, setLoading]         = useState(false);
+  const [agentStep, setAgentStep]     = useState<string>('');
   const [error, setError]             = useState<string | null>(null);
   const [generated, setGenerated]     = useState(false);
   const [showPeriodMenu, setMenu]     = useState(false);
@@ -383,11 +384,12 @@ export const ReportView: React.FC<Props> = ({ isDarkMode, sales, expenses, userN
   async function handleGenerate() {
     if (!compat.ok || loading) return;
     setLoading(true);
+    setAgentStep('');
     setError(null);
     setGenerated(false);
     try {
       const { sales: fS, expenses: fE } = filterByPeriod(sales, expenses, period);
-      const report = await generateFinancialReport(sales, expenses, period, userName);
+      const report = await generateFinancialReport(sales, expenses, period, userName, setAgentStep);
       exportToPDF(report, fS, fE, userName, period);
       setGenerated(true);
       saveLastReport(period);
@@ -565,7 +567,7 @@ export const ReportView: React.FC<Props> = ({ isDarkMode, sales, expenses, userN
           className="w-full py-3.5 rounded-xl font-black text-sm text-black bg-gradient-to-r from-[#B8860B] to-[#FFD700] active:scale-[0.98] transition-all duration-200 shadow-md disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
         >
           {loading
-            ? <><Loader2 className="w-4 h-4 animate-spin" /> Generando PDF...</>
+            ? <><Loader2 className="w-4 h-4 animate-spin" /><span className="truncate">{agentStep || 'Iniciando...'}</span></>
             : <><Download className="w-4 h-4" /> Generar y descargar PDF</>}
         </button>
 
