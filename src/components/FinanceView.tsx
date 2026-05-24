@@ -1,8 +1,8 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState, useRef, useEffect } from 'react';
 import {
   ArrowUpRight, ArrowDownRight, BarChart2, TrendingUp, TrendingDown,
   ShoppingBag, ChevronRight, ChevronDown, Send, MessageCircle, Lightbulb,
-  Wallet, Calendar, X,
+  Wallet, Calendar, X, Check,
 } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, ResponsiveContainer, CartesianGrid, Tooltip } from 'recharts';
 import { cn } from '../lib/utils';
@@ -12,6 +12,74 @@ import { RegisterSaleModal } from './RegisterSaleModal';
 import { RegisterExpenseModal } from './RegisterExpenseModal';
 
 const DAY_SHORT = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
+
+type ChartPeriod = 'hoy' | '7d' | '14d' | '21d' | 'mes' | '3m' | '6m';
+const CHART_PERIOD_LIST: { value: ChartPeriod; label: string; sub: string }[] = [
+  { value: 'hoy',  label: 'Hoy',          sub: 'Solo hoy' },
+  { value: '7d',   label: 'Esta semana',   sub: '7 días' },
+  { value: '14d',  label: 'Dos semanas',   sub: '14 días' },
+  { value: '21d',  label: 'Tres semanas',  sub: '21 días' },
+  { value: 'mes',  label: 'Este mes',      sub: 'Mes actual' },
+  { value: '3m',   label: '3 meses',       sub: 'Últimos 90 días' },
+  { value: '6m',   label: '6 meses',       sub: 'Últimos 180 días' },
+];
+
+function buildChartData(
+  sales: Sale[],
+  expenses: Expense[],
+  period: ChartPeriod,
+): { name: string; income: number; exp: number }[] {
+  const now = new Date();
+
+  if (period === 'hoy') {
+    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    return [7, 9, 11, 13, 15, 17, 19, 21].map(h => {
+      const hStart = new Date(todayStart.getTime() + h * 3_600_000);
+      const hEnd   = new Date(hStart.getTime() + 2 * 3_600_000);
+      return {
+        name: `${h}h`,
+        income: sales.filter(s => { const d = (s.createdAt?.toDate ? s.createdAt.toDate() : new Date()); return d >= hStart && d < hEnd; }).reduce((a, x) => a + x.total, 0),
+        exp:    expenses.filter(e => { const d = (e.createdAt?.toDate ? e.createdAt.toDate() : new Date()); return d >= hStart && d < hEnd; }).reduce((a, x) => a + x.amount, 0),
+      };
+    });
+  }
+
+  if (period === '3m' || period === '6m') {
+    const weeks = period === '3m' ? 13 : 26;
+    return Array.from({ length: weeks }, (_, i) => {
+      const wEnd   = new Date(now.getTime() - (weeks - 1 - i) * 7 * 86_400_000);
+      const wStart = new Date(wEnd.getTime() - 7 * 86_400_000);
+      return {
+        name: wEnd.toLocaleDateString('es-CO', { day: '2-digit', month: 'short' }),
+        income: sales.filter(s => { const d = (s.createdAt?.toDate ? s.createdAt.toDate() : new Date()); return d >= wStart && d < wEnd; }).reduce((a, x) => a + x.total, 0),
+        exp:    expenses.filter(e => { const d = (e.createdAt?.toDate ? e.createdAt.toDate() : new Date()); return d >= wStart && d < wEnd; }).reduce((a, x) => a + x.amount, 0),
+      };
+    });
+  }
+
+  // Daily grouping
+  let startDate: Date;
+  if (period === 'mes') {
+    startDate = new Date(now.getFullYear(), now.getMonth(), 1);
+  } else {
+    const daysMap: Record<string, number> = { '7d': 7, '14d': 14, '21d': 21 };
+    startDate = new Date(now.getTime() - daysMap[period] * 86_400_000);
+  }
+  startDate.setHours(0, 0, 0, 0);
+
+  const result: { name: string; income: number; exp: number }[] = [];
+  let cur = new Date(startDate);
+  while (cur <= now) {
+    const dayEnd = new Date(cur.getTime() + 86_400_000);
+    result.push({
+      name: DAY_SHORT[cur.getDay()],
+      income: sales.filter(s => { const d = (s.createdAt?.toDate ? s.createdAt.toDate() : new Date()); return d >= cur && d < dayEnd; }).reduce((a, x) => a + x.total, 0),
+      exp:    expenses.filter(e => { const d = (e.createdAt?.toDate ? e.createdAt.toDate() : new Date()); return d >= cur && d < dayEnd; }).reduce((a, x) => a + x.amount, 0),
+    });
+    cur = new Date(cur.getTime() + 86_400_000);
+  }
+  return result;
+}
 
 function getSaleDate(sale: Sale): Date {
   return sale.createdAt?.toDate ? sale.createdAt.toDate() : new Date();
@@ -74,6 +142,19 @@ export const FinanceView = ({ isDarkMode, sales, expenses, userId, userName }: P
   const [showSaleModal, setShowSaleModal] = useState(false);
   const [showExpenseModal, setShowExpenseModal] = useState(false);
   const [dismissedTips, setDismissedTips] = useState<Set<string>>(() => new Set());
+  const [chartPeriod, setChartPeriod] = useState<ChartPeriod>('7d');
+  const [showChartMenu, setShowChartMenu] = useState(false);
+  const chartMenuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (chartMenuRef.current && !chartMenuRef.current.contains(e.target as Node)) {
+        setShowChartMenu(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
 
   const cardBase = cn('rounded-2xl shadow-sm p-6', isDarkMode ? 'bg-[#1A1A1A]' : 'bg-white');
   const muted = isDarkMode ? 'text-white/40' : 'text-[#5b5c5a]/60';
@@ -102,27 +183,12 @@ export const FinanceView = ({ isDarkMode, sales, expenses, userId, userName }: P
   const balance = stats.monthIncome - stats.monthExp;
   const vsYest = stats.todayInc - stats.yestInc;
 
-  // ── weekly data (grouped bars) ────────────────────────────────────────────
-  const weeklyData = useMemo(() => {
-    const rows = Array.from({ length: 7 }, (_, i) => {
-      const d = new Date();
-      d.setDate(d.getDate() - (6 - i));
-      return { name: DAY_SHORT[d.getDay()], income: 0, exp: 0, ts: new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime() };
-    });
-    sales.forEach(s => {
-      const d = getSaleDate(s);
-      const ts = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
-      const row = rows.find(r => r.ts === ts);
-      if (row) row.income += s.total;
-    });
-    expenses.forEach(e => {
-      const d = getExpenseDate(e);
-      const ts = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
-      const row = rows.find(r => r.ts === ts);
-      if (row) row.exp += e.amount;
-    });
-    return rows;
-  }, [sales, expenses]);
+  // ── dynamic chart data ────────────────────────────────────────────────────
+  const chartData = useMemo(
+    () => buildChartData(sales, expenses, chartPeriod),
+    [sales, expenses, chartPeriod],
+  );
+  const currentPeriodCfg = CHART_PERIOD_LIST.find(p => p.value === chartPeriod)!;
 
   // ── all movements merged & sorted ─────────────────────────────────────────
   const allMovements = useMemo<Movement[]>(() => [
@@ -138,13 +204,20 @@ export const FinanceView = ({ isDarkMode, sales, expenses, userId, userName }: P
       all.push({ id: 'high-expenses', text: `Por cada $100 que entran, $${pct} se van en gastos. ¿Hay algo que puedas reducir?` });
     }
     if (vsYest > 0) all.push({ id: 'vs-yesterday', text: `Hoy llevas ${fmt(vsYest)} más que ayer. ¡Buen ritmo de ventas!` });
-    const todayRow = weeklyData[6];
-    const prevMax = Math.max(...weeklyData.slice(0, 6).map(r => r.income), 0);
-    if (todayRow?.income > 0 && todayRow.income > prevMax) all.push({ id: 'best-day', text: '¡Hoy fue tu mejor día de ventas de la semana! Sigue así.' });
+    const now = new Date();
+    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const todayIncome = sales.filter(s => getSaleDate(s) >= todayStart).reduce((a, x) => a + x.total, 0);
+    const weekStart = new Date(now.getTime() - 6 * 86_400_000);
+    const prevWeekMax = Math.max(...Array.from({ length: 6 }, (_, i) => {
+      const d = new Date(weekStart.getTime() + i * 86_400_000);
+      const dEnd = new Date(d.getTime() + 86_400_000);
+      return sales.filter(s => { const sd = getSaleDate(s); return sd >= d && sd < dEnd; }).reduce((a, x) => a + x.total, 0);
+    }), 0);
+    if (todayIncome > 0 && todayIncome > prevWeekMax) all.push({ id: 'best-day', text: '¡Hoy fue tu mejor día de ventas de la semana! Sigue así.' });
     if (balance > 0) all.push({ id: 'positive-balance', text: `Llevas ${fmt(balance)} de utilidad este mes. Tu negocio está en positivo.` });
     if (all.length === 0) all.push({ id: 'default', text: 'Registra tus ventas y gastos cada día para ver cómo crece tu negocio.' });
     return all.filter(t => !dismissedTips.has(t.id));
-  }, [stats, vsYest, weeklyData, balance, dismissedTips]);
+  }, [stats, vsYest, sales, balance, dismissedTips]);
 
   const metrics = [
     { label: 'Ingresos',       sub: 'Este mes', value: fmt(stats.monthIncome), color: 'text-green-600',                           bg: isDarkMode ? 'bg-green-500/20'  : 'bg-green-50',  Icon: ArrowUpRight,  iconColor: 'text-green-600' },
@@ -234,11 +307,44 @@ export const FinanceView = ({ isDarkMode, sales, expenses, userId, userName }: P
           <div className="flex items-center justify-between mb-3">
             <div>
               <h3 className="font-bold text-base">Flujo de caja</h3>
-              <p className={cn('text-xs', muted)}>Últimos 7 días</p>
+              <p className={cn('text-xs', muted)}>{currentPeriodCfg.sub}</p>
             </div>
-            <button className={cn('flex items-center gap-1 text-xs font-semibold px-3 py-1.5 rounded-lg border', isDarkMode ? 'border-white/20 text-white/60' : 'border-gray-200 text-[#5b5c5a]')}>
-              7 días <ChevronDown className="w-3 h-3" />
-            </button>
+            <div className="relative" ref={chartMenuRef}>
+              <button
+                onClick={() => setShowChartMenu(v => !v)}
+                className={cn(
+                  'flex items-center gap-1 text-xs font-semibold px-3 py-1.5 rounded-lg border transition-colors',
+                  showChartMenu
+                    ? 'border-[#B8860B] text-[#B8860B] bg-[#B8860B]/10'
+                    : isDarkMode ? 'border-white/20 text-white/60 hover:border-white/30' : 'border-gray-200 text-[#5b5c5a] hover:border-gray-300',
+                )}
+              >
+                {currentPeriodCfg.label}
+                <ChevronDown className={cn('w-3 h-3 transition-transform', showChartMenu && 'rotate-180')} />
+              </button>
+              {showChartMenu && (
+                <div className={cn(
+                  'absolute right-0 top-full mt-1 w-44 rounded-xl shadow-xl border z-50 overflow-hidden py-1',
+                  isDarkMode ? 'bg-[#1A1A1A] border-white/10' : 'bg-white border-gray-200',
+                )}>
+                  {CHART_PERIOD_LIST.map(opt => (
+                    <button
+                      key={opt.value}
+                      onClick={() => { setChartPeriod(opt.value); setShowChartMenu(false); }}
+                      className={cn(
+                        'w-full flex items-center justify-between px-3 py-2 text-xs transition-colors',
+                        chartPeriod === opt.value
+                          ? 'bg-[#B8860B]/10 text-[#B8860B] font-bold'
+                          : isDarkMode ? 'text-white/70 hover:bg-white/5 font-medium' : 'text-[#2e2f2d] hover:bg-gray-50 font-medium',
+                      )}
+                    >
+                      <span>{opt.label}</span>
+                      {chartPeriod === opt.value && <Check className="w-3 h-3" />}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
           <div className="flex items-center gap-4 mb-4">
             <div className="flex items-center gap-1.5">
@@ -252,13 +358,14 @@ export const FinanceView = ({ isDarkMode, sales, expenses, userId, userName }: P
           </div>
           <div className="h-[220px] w-full min-w-0">
             <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
-              <BarChart data={weeklyData} barCategoryGap="20%" barGap={2}>
+              <BarChart data={chartData} barCategoryGap="20%" barGap={2}>
                 <CartesianGrid vertical={false} stroke={isDarkMode ? '#2a2a2a' : '#f0f0ee'} />
                 <XAxis
                   dataKey="name"
                   axisLine={false}
                   tickLine={false}
                   tick={{ fontSize: 10, fontWeight: 700, fill: isDarkMode ? '#FDFBF0' : '#2e2f2d', opacity: 0.5 }}
+                  interval={chartData.length > 14 ? Math.floor(chartData.length / 7) : 0}
                 />
                 <YAxis
                   axisLine={false}
