@@ -2,7 +2,7 @@ import React, { useMemo, useState } from 'react';
 import {
   ArrowUpRight, ArrowDownRight, BarChart2, TrendingUp, TrendingDown,
   ShoppingBag, ChevronRight, ChevronDown, Send, MessageCircle, Lightbulb,
-  Wallet, Calendar, X,
+  Wallet, Calendar, X, FileText,
 } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, ResponsiveContainer, CartesianGrid, Tooltip } from 'recharts';
 import { cn } from '../lib/utils';
@@ -10,6 +10,7 @@ import { Sale, Expense, getSaleLabel } from '../types';
 import { MovementDetailModal } from './MovementDetailModal';
 import { RegisterSaleModal } from './RegisterSaleModal';
 import { RegisterExpenseModal } from './RegisterExpenseModal';
+import { ReportModal } from './ReportModal';
 
 const DAY_SHORT = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
 
@@ -74,6 +75,7 @@ export const FinanceView = ({ isDarkMode, sales, expenses, userId, userName }: P
   const [showSaleModal, setShowSaleModal] = useState(false);
   const [showExpenseModal, setShowExpenseModal] = useState(false);
   const [dismissedTips, setDismissedTips] = useState<Set<string>>(() => new Set());
+  const [showReport, setShowReport] = useState(false);
 
   const cardBase = cn('rounded-2xl shadow-sm p-6', isDarkMode ? 'bg-[#1A1A1A]' : 'bg-white');
   const muted = isDarkMode ? 'text-white/40' : 'text-[#5b5c5a]/60';
@@ -163,6 +165,19 @@ export const FinanceView = ({ isDarkMode, sales, expenses, userId, userName }: P
 
   return (
     <div className="space-y-4 animate-in fade-in slide-in-from-bottom-4 duration-500">
+
+      {/* ── Header ───────────────────────────────────────────────────────── */}
+      <div className="flex items-center justify-between">
+        <h2 className={cn('text-xl font-black', isDarkMode ? 'text-white' : 'text-[#2e2f2d]')}>Finanzas</h2>
+        <button
+          onClick={() => setShowReport(true)}
+          className="flex items-center gap-2 px-4 py-2 rounded-xl font-bold text-sm text-[#B8860B] border-2 border-[#B8860B]/30 hover:bg-[#B8860B]/10 active:scale-[0.97] transition-all duration-200"
+        >
+          <FileText className="w-4 h-4" />
+          <span className="hidden sm:inline">Reporte IA</span>
+          <span className="sm:hidden">Reporte</span>
+        </button>
+      </div>
 
       {/* ── Row 1: Balance + Actions ──────────────────────────────────────── */}
       <div className="flex flex-col gap-4 md:grid" style={{ gridTemplateColumns: 'minmax(0,3fr) minmax(0,2fr)' }}>
@@ -382,6 +397,16 @@ export const FinanceView = ({ isDarkMode, sales, expenses, userId, userName }: P
       )}
 
       {/* Modals */}
+      {showReport && (
+        <ReportModal
+          isDarkMode={isDarkMode}
+          sales={sales}
+          expenses={expenses}
+          userId={userId}
+          userName={userName}
+          onClose={() => setShowReport(false)}
+        />
+      )}
       {showSaleModal && (
         <RegisterSaleModal userId={userId} isDarkMode={isDarkMode} onClose={() => setShowSaleModal(false)} />
       )}
