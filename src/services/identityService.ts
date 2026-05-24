@@ -183,11 +183,17 @@ export async function saveVerification(
   }
 
   // Always write the verification status to Firestore
-  await updateDoc(doc(db, 'users', userId), {
-    identityVerified: result.ok,
-    identityVerifiedAt: result.ok ? serverTimestamp() : null,
-    cedulaExtracted: result.extractedCedula ?? '',
-    cedulaName: result.extractedName ?? '',
-    ...(photoURL ? { cedulaPhotoURL: photoURL } : {}),
-  });
+  try {
+    await updateDoc(doc(db, 'users', userId), {
+      identityVerified: result.ok,
+      identityVerifiedAt: result.ok ? serverTimestamp() : null,
+      cedulaExtracted: result.extractedCedula ?? '',
+      cedulaName: result.extractedName ?? '',
+      ...(photoURL ? { cedulaPhotoURL: photoURL } : {}),
+    });
+    console.log('[identityService] identityVerified saved to Firestore ✓');
+  } catch (e) {
+    console.error('[identityService] Firestore updateDoc failed:', e);
+    throw e; // re-throw so the caller sees it
+  }
 }

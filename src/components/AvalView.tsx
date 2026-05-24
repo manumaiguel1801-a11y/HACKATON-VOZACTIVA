@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   ShieldCheck, Eye, FileText, CheckCircle2, ArrowRight,
   Building2, Lock, Star, AlertCircle,
@@ -60,10 +60,18 @@ const REQUIREMENTS = [
 ];
 
 export const AvalView = ({ isDarkMode, userId, prefillCedula = '', profileBirthDate = '', userName = '', sales, identityVerified, verifiedCedula: savedCedula, verifiedName: savedName }: Props) => {
-  const alreadyVerified = !!identityVerified;
-  const [step, setStep] = useState<Step>(alreadyVerified ? 'dashboard' : 'info');
+  const [step, setStep]                     = useState<Step>(identityVerified ? 'dashboard' : 'info');
   const [verifiedName, setVerifiedName]     = useState(savedName || userName);
   const [verifiedCedula, setVerifiedCedula] = useState(savedCedula || prefillCedula);
+
+  // React when Firestore profile loads after component already mounted
+  useEffect(() => {
+    if (identityVerified) {
+      setStep('dashboard');
+      if (savedCedula) setVerifiedCedula(savedCedula);
+      if (savedName)   setVerifiedName(savedName);
+    }
+  }, [identityVerified, savedCedula, savedName]);
 
   const card = cn('rounded-2xl p-6', isDarkMode ? 'bg-[#1A1A1A]' : 'bg-white');
   const muted = isDarkMode ? 'text-white/40' : 'text-black/40';
