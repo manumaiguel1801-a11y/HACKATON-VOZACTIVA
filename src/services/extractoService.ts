@@ -28,7 +28,7 @@ export interface ExtractoAnalysis {
   passwordUnlocked: boolean;
 }
 
-const MODELS = ['gemini-2.5-flash', 'gemini-2.0-flash'];
+const MODELS = ['gemini-2.0-flash', 'gemini-1.5-flash'];
 
 function getClient() {
   const key = process.env.GEMINI_API_KEY;
@@ -54,17 +54,18 @@ async function pdfToImages(
     });
     const pdfDoc = await loadingTask.promise;
     const blobs: Blob[] = [];
+    const maxPages = Math.min(pdfDoc.numPages, 6);
 
-    for (let i = 1; i <= pdfDoc.numPages; i++) {
+    for (let i = 1; i <= maxPages; i++) {
       const page = await pdfDoc.getPage(i);
-      const viewport = page.getViewport({ scale: 2.0 });
+      const viewport = page.getViewport({ scale: 1.5 });
       const canvas = document.createElement('canvas');
       canvas.width = viewport.width;
       canvas.height = viewport.height;
       const ctx = canvas.getContext('2d')!;
       await page.render({ canvasContext: ctx as any, viewport, canvas }).promise;
       const blob = await new Promise<Blob>((res, rej) =>
-        canvas.toBlob(b => (b ? res(b) : rej(new Error('canvas toBlob failed'))), 'image/jpeg', 0.92),
+        canvas.toBlob(b => (b ? res(b) : rej(new Error('canvas toBlob failed'))), 'image/jpeg', 0.75),
       );
       blobs.push(blob);
     }

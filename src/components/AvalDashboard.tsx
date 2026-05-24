@@ -1,12 +1,12 @@
 import React, { useState, useRef, useEffect } from 'react';
 import {
   ShieldCheck, FileText, Upload, CheckCircle2,
-  Lock, BarChart3, Building2, X,
-  FileCheck, AlertCircle, Sparkles, QrCode, Loader2,
+  Lock, X,
+  FileCheck, AlertCircle, Sparkles, Loader2,
   TrendingUp, TrendingDown, ChevronDown, ChevronUp, Smartphone,
   Info, LogOut,
 } from 'lucide-react';
-import { collection, addDoc, getDocs, deleteDoc, doc, serverTimestamp, query, orderBy } from 'firebase/firestore';
+import { collection, addDoc, getDocs, deleteDoc, doc, serverTimestamp, query, orderBy, getDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 import { cn } from '../lib/utils';
 import { analyzeExtracto, ExtractoAnalysis } from '../services/extractoService';
@@ -29,12 +29,6 @@ interface UploadedFile {
   errorMsg?: string;
 }
 
-const FEATURE_CARDS = [
-  { id: 'certificado', icon: FileText,  title: 'Mi certificado',      desc: 'PDF crediticio con QR verificable',            color: 'text-[#B8860B]',  bg: 'bg-[#B8860B]/10' },
-  { id: 'historial',  icon: BarChart3,  title: 'Historial verificado', desc: 'Ventas y gastos con sello de autenticidad',    color: 'text-purple-500', bg: 'bg-purple-500/10' },
-  { id: 'bancos',     icon: Building2,  title: 'Conectar con bancos',  desc: 'Comparte tu perfil con entidades financieras', color: 'text-blue-500',   bg: 'bg-blue-500/10' },
-  { id: 'qr',         icon: QrCode,     title: 'Mi QR de verificación',desc: 'Código único que valida tu identidad',         color: 'text-green-500',  bg: 'bg-green-500/10' },
-];
 
 interface BankTip {
   name: string;
@@ -247,11 +241,29 @@ export const AvalDashboard = ({ isDarkMode, cedula, userName, userId, onBack }: 
   const [showTips, setShowTips]           = useState(false);
   const [showCloseModal, setShowCloseModal] = useState(false);
   const [openBank, setOpenBank]           = useState<string | null>(null);
+  const [daysInApp, setDaysInApp]         = useState<number | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Cargar análisis guardados al montar
+  const REQUIRED_DAYS = 30;
+  const canUpload = daysInApp === null || daysInApp >= REQUIRED_DAYS;
+  const daysLeft  = daysInApp !== null ? Math.max(0, REQUIRED_DAYS - daysInApp) : null;
+
+  // Cargar análisis guardados y días en la app al montar
   useEffect(() => {
     const load = async () => {
+      try {
+        // Calcular días en la app desde createdAt del usuario
+        const userDoc = await getDoc(doc(db, 'users', userId));
+        if (userDoc.exists()) {
+          const raw = userDoc.data().createdAt;
+          const createdDate: Date = raw?.toDate ? raw.toDate() : new Date(raw);
+          const days = Math.floor((Date.now() - createdDate.getTime()) / 86_400_000);
+          setDaysInApp(days);
+        } else {
+          setDaysInApp(0);
+        }
+      } catch { setDaysInApp(0); }
+
       try {
         const col = collection(db, 'users', userId, 'extractos');
         const snap = await getDocs(query(col, orderBy('analyzedAt', 'desc')));
@@ -518,37 +530,63 @@ export const AvalDashboard = ({ isDarkMode, cedula, userName, userId, onBack }: 
           </div>
         )}
 
-        {/* Drop zone */}
-        <div
-          onDragOver={e => { e.preventDefault(); setIsDragging(true); }}
-          onDragLeave={() => setIsDragging(false)}
-          onDrop={e => { e.preventDefault(); setIsDragging(false); handleFiles(e.dataTransfer.files); }}
-          onClick={() => fileInputRef.current?.click()}
-          className={cn(
-            'border-2 border-dashed rounded-xl p-6 flex flex-col items-center gap-2.5 cursor-pointer transition-all',
-            isDragging
-              ? 'border-[#B8860B] bg-[#B8860B]/10'
-              : isDarkMode
-                ? 'border-white/10 hover:border-[#B8860B]/40 hover:bg-[#B8860B]/5'
-                : 'border-black/10 hover:border-[#B8860B]/40 hover:bg-[#FFF8DC]/50',
-          )}
-        >
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept=".pdf"
-            multiple
-            className="hidden"
-            onChange={e => handleFiles(e.target.files)}
-          />
-          <div className={cn('w-12 h-12 rounded-2xl flex items-center justify-center', isDarkMode ? 'bg-white/8' : 'bg-[#FFF8DC]')}>
-            <Upload className="w-6 h-6 text-[#B8860B]" />
+        {/* Drop zone — bloqueado si no lleva 30 días */}
+        {!canUpload ? (
+          <div className={cn('rounded-xl p-5 flex flex-col items-center gap-3 text-center border-2 border-dashed', isDarkMode ? 'border-white/10 bg-white/3' : 'border-black/10 bg-black/2')}>
+            <div className={cn('w-12 h-12 rounded-2xl flex items-center justify-center', isDarkMode ? 'bg-white/8' : 'bg-gray-100')}>
+              <Lock className={cn('w-6 h-6', muted)} />
+            </div>
+            <div>
+              <p className={cn('text-sm font-black', text)}>Disponible en {daysLeft} día{daysLeft !== 1 ? 's' : ''}</p>
+              <p className={cn('text-xs mt-1 leading-snug', muted)}>
+                Necesitas 30 días de historial en Voz Activa para analizar tu extracto.
+              </p>
+            </div>
+            <div className="w-full space-y-1.5">
+              <div className="flex justify-between text-[10px] font-bold">
+                <span className={muted}>Día {daysInApp ?? 0} de 30</span>
+                <span className="text-[#B8860B]">{Math.round(((daysInApp ?? 0) / REQUIRED_DAYS) * 100)}%</span>
+              </div>
+              <div className={cn('w-full h-2 rounded-full overflow-hidden', isDarkMode ? 'bg-white/10' : 'bg-black/8')}>
+                <div
+                  className="h-full rounded-full bg-gradient-to-r from-[#B8860B] to-[#FFD700] transition-all duration-700"
+                  style={{ width: `${Math.min(((daysInApp ?? 0) / REQUIRED_DAYS) * 100, 100)}%` }}
+                />
+              </div>
+            </div>
           </div>
-          <div className="text-center">
-            <p className={cn('text-sm font-black', text)}>Toca para subir o arrastra aquí</p>
-            <p className={cn('text-xs mt-0.5', muted)}>Solo archivos PDF</p>
+        ) : (
+          <div
+            onDragOver={e => { e.preventDefault(); setIsDragging(true); }}
+            onDragLeave={() => setIsDragging(false)}
+            onDrop={e => { e.preventDefault(); setIsDragging(false); handleFiles(e.dataTransfer.files); }}
+            onClick={() => fileInputRef.current?.click()}
+            className={cn(
+              'border-2 border-dashed rounded-xl p-6 flex flex-col items-center gap-2.5 cursor-pointer transition-all',
+              isDragging
+                ? 'border-[#B8860B] bg-[#B8860B]/10'
+                : isDarkMode
+                  ? 'border-white/10 hover:border-[#B8860B]/40 hover:bg-[#B8860B]/5'
+                  : 'border-black/10 hover:border-[#B8860B]/40 hover:bg-[#FFF8DC]/50',
+            )}
+          >
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".pdf"
+              multiple
+              className="hidden"
+              onChange={e => handleFiles(e.target.files)}
+            />
+            <div className={cn('w-12 h-12 rounded-2xl flex items-center justify-center', isDarkMode ? 'bg-white/8' : 'bg-[#FFF8DC]')}>
+              <Upload className="w-6 h-6 text-[#B8860B]" />
+            </div>
+            <div className="text-center">
+              <p className={cn('text-sm font-black', text)}>Toca para subir o arrastra aquí</p>
+              <p className={cn('text-xs mt-0.5', muted)}>Solo archivos PDF</p>
+            </div>
           </div>
-        </div>
+        )}
 
         {/* File list */}
         {uploadedFiles.length > 0 && (
@@ -603,28 +641,37 @@ export const AvalDashboard = ({ isDarkMode, cedula, userName, userId, onBack }: 
         </div>
       </div>
 
-      {/* Próximamente */}
-      <div>
-        <p className={cn('text-[10px] font-black uppercase tracking-widest px-1 mb-3', muted)}>Próximamente</p>
-        <div className="grid grid-cols-2 gap-3">
-          {FEATURE_CARDS.map(fc => (
-            <div key={fc.id} className={cn('rounded-2xl p-4 flex flex-col gap-3 relative overflow-hidden', isDarkMode ? 'bg-[#1A1A1A]' : 'bg-white')}>
-              <div className={cn('w-9 h-9 rounded-xl flex items-center justify-center', fc.bg)}>
-                <fc.icon className={cn('w-4 h-4', fc.color)} />
-              </div>
-              <div>
-                <p className={cn('text-xs font-black', text)}>{fc.title}</p>
-                <p className={cn('text-[10px] leading-snug mt-0.5', muted)}>{fc.desc}</p>
-              </div>
-              <div className="absolute top-3 right-3">
-                <span className={cn('text-[8px] font-black uppercase tracking-wide px-1.5 py-0.5 rounded-full', isDarkMode ? 'bg-white/8 text-white/30' : 'bg-black/5 text-black/30')}>
-                  Pronto
-                </span>
-              </div>
+      {/* Requisito 30 días */}
+      {daysInApp !== null && daysInApp < REQUIRED_DAYS && (
+        <div className={cn('rounded-2xl p-4 space-y-3', isDarkMode ? 'bg-[#1A1A1A]' : 'bg-white')}>
+          <div className="flex items-start gap-3">
+            <div className={cn('w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0', isDarkMode ? 'bg-[#B8860B]/15' : 'bg-[#FFF8DC]')}>
+              <FileText className="w-4.5 h-4.5 text-[#B8860B]" style={{ width: 18, height: 18 }} />
             </div>
-          ))}
+            <div>
+              <p className={cn('text-sm font-black', text)}>Análisis de extracto</p>
+              <p className={cn('text-xs mt-0.5', muted)}>Disponible cuando completes 30 días en Voz Activa</p>
+            </div>
+          </div>
+          <div className="space-y-1.5">
+            <div className="flex justify-between items-center">
+              <span className={cn('text-xs font-bold', text)}>Tu progreso</span>
+              <span className="text-xs font-black text-[#B8860B]">
+                {daysInApp} / {REQUIRED_DAYS} días
+              </span>
+            </div>
+            <div className={cn('w-full h-2.5 rounded-full overflow-hidden', isDarkMode ? 'bg-white/10' : 'bg-black/8')}>
+              <div
+                className="h-full rounded-full bg-gradient-to-r from-[#B8860B] to-[#FFD700] transition-all duration-700"
+                style={{ width: `${Math.min((daysInApp / REQUIRED_DAYS) * 100, 100)}%` }}
+              />
+            </div>
+          </div>
+          <p className={cn('text-[11px] leading-snug', muted)}>
+            Te faltan <strong className={isDarkMode ? 'text-white/70' : 'text-[#2e2f2d]'}>{REQUIRED_DAYS - daysInApp} días</strong> para poder analizar tu extracto bancario. Sigue registrando tus ventas y gastos en la app.
+          </p>
         </div>
-      </div>
+      )}
 
       <div className={cn('rounded-2xl p-4 flex gap-3', isDarkMode ? 'bg-white/5' : 'bg-black/3')}>
         <Sparkles className="w-4 h-4 flex-shrink-0 mt-0.5 text-[#B8860B]" />
