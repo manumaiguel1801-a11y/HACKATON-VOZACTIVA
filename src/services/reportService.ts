@@ -145,26 +145,49 @@ function computeBestDay(sales: Sale[], start: Date): { name: string; amount: num
   return { name, amount };
 }
 
-export function detectAvailablePeriod(
+const MIN_COVERAGE: Partial<Record<ReportPeriod, number>> = {
+  '7d': 2, '14d': 5, '21d': 7, '3m': 14, '6m': 30,
+};
+
+export function checkPeriodCompatibility(
   sales: Sale[],
   expenses: Expense[],
   period: ReportPeriod,
-): { hasData: boolean; suggestion?: ReportPeriod } {
-  const { start } = getDateRange(period);
-  const hasCurrent =
-    sales.some(s => getSaleDate(s) >= start) ||
-    expenses.some(e => getExpenseDate(e) >= start);
-  if (hasCurrent) return { hasData: true };
+): { ok: boolean; daysCovered: number; bestMatch: ReportPeriod } {
+  const allDates = [
+    ...sales.map(s => getSaleDate(s)),
+    ...expenses.map(e => getExpenseDate(e)),
+  ];
 
-  const idx = PERIOD_ORDER.indexOf(period);
-  // Search from longest-shorter down to today
-  for (const p of PERIOD_ORDER.slice(0, idx).reverse()) {
-    const { start: s } = getDateRange(p);
-    if (sales.some(sale => getSaleDate(sale) >= s) || expenses.some(e => getExpenseDate(e) >= s)) {
-      return { hasData: false, suggestion: p };
-    }
+  if (allDates.length === 0) return { ok: false, daysCovered: 0, bestMatch: 'hoy' };
+
+  const oldest      = new Date(Math.min(...allDates.map(d => d.getTime())));
+  const now         = new Date();
+  const daysCovered = (now.getTime() - oldest.getTime()) / 86_400_000;
+
+  const bestMatch: ReportPeriod =
+    daysCovered >= 150 ? '6m'
+    : daysCovered >= 70  ? '3m'
+    : daysCovered >= 25  ? 'mes'
+    : daysCovered >= 18  ? '21d'
+    : daysCovered >= 11  ? '14d'
+    : daysCovered >= 4   ? '7d'
+    : 'hoy';
+
+  if (period === 'all') return { ok: true, daysCovered, bestMatch };
+
+  if (period === 'hoy') {
+    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    return { ok: allDates.some(d => d >= todayStart), daysCovered, bestMatch };
   }
-  return { hasData: false };
+
+  if (period === 'mes') {
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    return { ok: allDates.some(d => d >= monthStart), daysCovered, bestMatch };
+  }
+
+  const minRequired = MIN_COVERAGE[period] ?? 1;
+  return { ok: daysCovered >= minRequired, daysCovered, bestMatch };
 }
 
 export function filterByPeriod(sales: Sale[], expenses: Expense[], period: ReportPeriod) {
