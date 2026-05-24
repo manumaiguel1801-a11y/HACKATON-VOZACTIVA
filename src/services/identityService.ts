@@ -172,15 +172,22 @@ export async function saveVerification(
   file: File,
   result: VerificationResult,
 ): Promise<void> {
-  const storageRef = ref(storage, `users/${userId}/cedula.jpg`);
-  await uploadBytes(storageRef, file);
-  const photoURL = await getDownloadURL(storageRef);
+  // Photo upload is best-effort — don't let it block saving the verified flag
+  let photoURL = '';
+  try {
+    const storageRef = ref(storage, `users/${userId}/cedula.jpg`);
+    await uploadBytes(storageRef, file);
+    photoURL = await getDownloadURL(storageRef);
+  } catch (e) {
+    console.warn('[identityService] Photo upload failed, continuing:', e);
+  }
 
+  // Always write the verification status to Firestore
   await updateDoc(doc(db, 'users', userId), {
     identityVerified: result.ok,
     identityVerifiedAt: result.ok ? serverTimestamp() : null,
-    cedulaPhotoURL: photoURL,
     cedulaExtracted: result.extractedCedula ?? '',
     cedulaName: result.extractedName ?? '',
+    ...(photoURL ? { cedulaPhotoURL: photoURL } : {}),
   });
 }
