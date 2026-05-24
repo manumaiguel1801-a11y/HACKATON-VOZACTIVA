@@ -1,6 +1,6 @@
 import React from 'react';
 
-export type Tab = 'inicio' | 'finanzas' | 'reporte' | 'camara' | 'inventario' | 'pasaporte' | 'perfil';
+export type Tab = 'inicio' | 'finanzas' | 'reporte' | 'camara' | 'inventario' | 'pasaporte' | 'perfil' | 'consejero' | 'credito';
 
 export interface Transaction {
   id: string;
@@ -106,6 +106,43 @@ export interface ScoreHistoryEntry {
   score: number;
   weekKey: string;
   recordedAt: any;
+}
+
+export interface RegistroDiario {
+  fecha: string; // 'YYYY-MM-DD'
+  estado: 'cumplido' | 'fallido' | 'sin_confirmar';
+  montoAhorrado?: number;
+  razon?: string;
+}
+
+export interface MetaAjuste {
+  fecha: any;
+  razon: string;
+  ahorroDiarioAnterior: number;
+  nuevoAhorroDiario: number;
+  fechaObjetivoAnterior: any;
+  nuevaFechaObjetivo: any;
+}
+
+export interface Meta {
+  id: string;
+  nombre: string;
+  montoObjetivo: number;
+  montoAhorrado: number;
+  ahorroDiario: number;
+  frecuencia: 'diario' | 'semanal';
+  fechaInicio: any;
+  fechaObjetivo: any;
+  estado: 'activa' | 'en-riesgo' | 'reajustada' | 'completada';
+  registros: RegistroDiario[];
+  historialAjustes?: MetaAjuste[];
+}
+
+export interface ConsejeroMessage {
+  id: string;
+  role: 'user' | 'assistant';
+  content: string;
+  timestamp: number;
 }
 
 export interface UserProfile {
