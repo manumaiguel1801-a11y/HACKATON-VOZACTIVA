@@ -1,40 +1,14 @@
-import { GoogleGenAI, Type } from '@google/genai';
 import * as pdfjsLib from 'pdfjs-dist';
+import type { ExtractoTransaction, ExtractoAnalysis } from '../../api/_lib/extractoAnalysis';
+
+// Re-export so existing importers don't break
+export type { ExtractoTransaction, ExtractoAnalysis };
 
 // pdfjs worker — use the bundled legacy worker to avoid separate fetch
 pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
   'pdfjs-dist/build/pdf.worker.min.mjs',
   import.meta.url,
 ).toString();
-
-export interface ExtractoTransaction {
-  fecha: string;
-  descripcion: string;
-  monto: number;
-  tipo: 'cobro_qr' | 'transferencia_recibida' | 'transferencia_enviada' | 'retiro' | 'pago_servicio' | 'otro';
-  remitente?: string;
-  esVentaProbable: boolean;
-}
-
-export interface ExtractoAnalysis {
-  entidad: string;
-  totalIngresos: number;
-  totalGastos: number;
-  ingresosVentas: number;
-  ingresosTransferencias: number;
-  porcentajeVentas: number;
-  transactions: ExtractoTransaction[];
-  miniAnalisis: string;
-  passwordUnlocked: boolean;
-}
-
-const MODELS = ['gemini-2.0-flash', 'gemini-1.5-flash'];
-
-function getClient() {
-  const key = process.env.GEMINI_API_KEY;
-  if (!key) throw new Error('GEMINI_API_KEY no configurada');
-  return new GoogleGenAI({ apiKey: key });
-}
 
 /**
  * Renders every page of a PDF to JPEG blobs.
@@ -96,77 +70,7 @@ async function pdfToImages(
   }
 }
 
-const SCHEMA = {
-  responseMimeType: 'application/json' as const,
-  responseSchema: {
-    type: Type.OBJECT,
-    properties: {
-      esExtractoBancario: { type: Type.BOOLEAN },
-      motivoRechazo:      { type: Type.STRING },
-      entidad:            { type: Type.STRING },
-      miniAnalisis:       { type: Type.STRING },
-      transactions: {
-        type: Type.ARRAY,
-        items: {
-          type: Type.OBJECT,
-          properties: {
-            fecha:           { type: Type.STRING },
-            descripcion:     { type: Type.STRING },
-            monto:           { type: Type.NUMBER },
-            tipo:            { type: Type.STRING, enum: ['cobro_qr','transferencia_recibida','transferencia_enviada','retiro','pago_servicio','otro'] },
-            remitente:       { type: Type.STRING },
-            esVentaProbable: { type: Type.BOOLEAN },
-          },
-          required: ['fecha','descripcion','monto','tipo','esVentaProbable'],
-        },
-      },
-    },
-    required: ['esExtractoBancario'],
-  },
-};
-
-const PROMPT = `Eres un analista financiero especializado en documentos bancarios colombianos.
-
-─── PASO 1: VERIFICACIÓN DEL DOCUMENTO ───
-Determina si estas imágenes corresponden a un extracto bancario / estado de cuenta con historial de movimientos (Nequi, Daviplata, Davivienda, Bancolombia u otro banco o billetera digital colombiana).
-
-Un extracto válido contiene:
-• Lista de múltiples transacciones con fechas y montos
-• Saldo disponible o saldo inicial/final
-• Nombre del titular o número de cuenta
-
-NO es un extracto si es: comprobante de pago individual, factura, contrato, foto de producto, etc.
-
-Si NO es extracto válido:
-→ esExtractoBancario: false
-→ motivoRechazo: describe qué tipo de documento es
-→ transactions: []
-→ miniAnalisis: ""
-
-─── PASO 2: EXTRACCIÓN (solo si es extracto válido) ───
-→ esExtractoBancario: true
-→ Extrae TODAS las transacciones visibles
-
-Tipos exactos:
-- "cobro_qr": pago recibido por código QR
-- "transferencia_recibida": alguien te envió dinero
-- "transferencia_enviada": tú enviaste dinero
-- "retiro": retiro de cajero o efectivo
-- "pago_servicio": pago de servicio
-- "otro": cualquier otra transacción
-
-esVentaProbable = true: cobros QR, pagos de clientes, múltiples pagos pequeños en el mismo día
-esVentaProbable = false: nombre propio enviando dinero, montos redondos grandes, "préstamo", "ayuda"
-
-monto: entero en pesos colombianos, sin puntos ni $. Solo positivos.
-entidad: "nequi", "daviplata", "davivienda", "bancolombia" o "otro".
-
-─── PASO 3: MINI ANÁLISIS (solo si es extracto válido) ───
-En el campo miniAnalisis escribe 2-3 oraciones cortas y directas sobre el comportamiento financiero del extracto.
-Incluye: total de ingresos vs gastos/retiros, si predominan cobros QR o transferencias, y algún patrón relevante (frecuencia, montos típicos).
-Usa cifras reales del extracto. Español colombiano directo, sin rodeos.`;
-
-async function blobToBase64(blob: Blob): Promise<string> {
+function blobToBase64(blob: Blob): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => resolve((reader.result as string).split(',')[1]);
@@ -175,77 +79,39 @@ async function blobToBase64(blob: Blob): Promise<string> {
   });
 }
 
-export async function analyzeExtracto(file: File, cedula = ''): Promise<ExtractoAnalysis> {
+export async function analyzeExtracto(
+  file: File,
+  cedula = '',
+  onStep?: (step: string) => void,
+): Promise<ExtractoAnalysis> {
   const ext = file.name.split('.').pop()?.toLowerCase();
   if (ext !== 'pdf') throw new Error('Solo se aceptan archivos PDF. Descarga el extracto en formato PDF desde tu banco.');
 
-  // Render PDF pages to images (handles password-protected PDFs with cédula)
+  onStep?.('Leyendo el PDF...');
   const rawBuffer = await file.arrayBuffer();
   const { images, wasLocked } = await pdfToImages(rawBuffer, cedula);
 
-  const client = getClient();
-
-  // Build parts: one inlineData per page image + the prompt
+  onStep?.('Analizando con IA...');
   const imageParts = await Promise.all(
     images.map(async (blob) => ({
-      inlineData: { mimeType: 'image/jpeg', data: await blobToBase64(blob) },
+      data: await blobToBase64(blob),
+      mimeType: 'image/jpeg',
     })),
   );
 
-  const contents = [{
-    role: 'user' as const,
-    parts: [...imageParts, { text: PROMPT }],
-  }];
+  const response = await fetch('/api/extracto', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ images: imageParts, wasLocked }),
+  });
 
-  let response: any;
-  let lastErr: any;
+  const payload = await response.json().catch(() => ({ error: 'Respuesta inválida del servidor' }));
 
-  for (const model of MODELS) {
-    try {
-      response = await client.models.generateContent({ model, contents, config: SCHEMA });
-      break;
-    } catch (err: any) {
-      console.warn(`[ExtractoService] ${model} falló:`, err?.message);
-      lastErr = err;
-    }
+  if (!response.ok) {
+    throw new Error(payload?.error ?? 'Error al analizar el extracto. Intenta de nuevo.');
   }
 
-  if (!response) throw lastErr ?? new Error('No se pudo analizar el extracto. Intenta de nuevo.');
-
-  let parsed: any = {};
-  try {
-    parsed = JSON.parse(response.text || '{}');
-  } catch {
-    throw new Error('La IA no pudo interpretar el archivo. Intenta de nuevo.');
-  }
-
-  if (parsed.esExtractoBancario === false) {
-    const motivo = parsed.motivoRechazo?.trim() || 'No contiene un historial de movimientos bancarios';
-    throw new Error(`Este archivo no es un extracto bancario válido. ${motivo}. Sube el PDF de tus movimientos de cuenta.`);
-  }
-
-  const transactions: ExtractoTransaction[] = (parsed.transactions ?? []).filter((t: any) => t.monto > 0);
-
-  const ingresos               = transactions.filter(t => ['cobro_qr','transferencia_recibida','otro'].includes(t.tipo));
-  const salidas                = transactions.filter(t => ['transferencia_enviada','retiro','pago_servicio'].includes(t.tipo));
-  const totalIngresos          = ingresos.reduce((s, t) => s + t.monto, 0);
-  const totalGastos            = salidas.reduce((s, t) => s + t.monto, 0);
-  const ingresosVentas         = ingresos.filter(t => t.esVentaProbable).reduce((s, t) => s + t.monto, 0);
-  const ingresosTransferencias = totalIngresos - ingresosVentas;
-  const porcentajeVentas       = totalIngresos > 0 ? Math.round((ingresosVentas / totalIngresos) * 100) : 0;
-  const entidad                = (parsed.entidad ?? 'otro').toLowerCase();
-
-  return {
-    entidad,
-    totalIngresos,
-    totalGastos,
-    ingresosVentas,
-    ingresosTransferencias,
-    porcentajeVentas,
-    transactions,
-    miniAnalisis: parsed.miniAnalisis?.trim() ?? '',
-    passwordUnlocked: wasLocked,
-  };
+  return payload as ExtractoAnalysis;
 }
 
 export function buildAnalysis(
@@ -270,5 +136,8 @@ export function buildAnalysis(
     transactions,
     miniAnalisis: '',
     passwordUnlocked: false,
+    consistenciaVentas: 0,
+    mesesConActividad: 0,
+    promedioMensualIngresos: 0,
   };
 }

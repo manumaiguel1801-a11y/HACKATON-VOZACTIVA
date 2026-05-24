@@ -6,6 +6,10 @@ export interface ExtractoSummary {
   totalGastos: number;
   porcentajeVentas: number;
   passwordUnlocked: boolean;
+  consistenciaVentas?: number;      // 0–100, del agente
+  mesesConActividad?: number;       // del agente
+  promedioMensualIngresos?: number; // del agente
+  miniAnalisis?: string;            // texto del agente
 }
 
 export interface ScoreBreakdown {
@@ -226,15 +230,21 @@ function calcRespaldoBancario(extractos: ExtractoSummary[]): number {
     else if (ratio >= 0)    factorAhorro = (ratio / 0.2) * 2.5;
   }
 
-  // Sub-factor 3: Credibilidad del documento (0–5)
+  // Sub-factor 3: Consistencia de ventas (0–5), del agente
+  // Usa el dato de consistenciaVentas si está disponible (análisis del agente)
+  const maxConsistencia = Math.max(...extractos.map(e => e.consistenciaVentas ?? 50));
+  const factorConsistencia = (maxConsistencia / 100) * 5;
+
+  // Sub-factor 4: Credibilidad del documento (0–5)
   // +2 si algún PDF estaba protegido con cédula (más auténtico)
-  // +1 por cada extracto adicional (más meses = más historial, máx 3)
+  // +1 por mes de historial cubierto (máx 3 meses)
   const credPass  = extractos.some(e => e.passwordUnlocked) ? 2 : 0;
-  const credCount = Math.min(extractos.length, 3);
-  const factorCredibilidad = credPass + credCount;
+  const maxMeses  = Math.max(...extractos.map(e => e.mesesConActividad ?? 1));
+  const credMeses = Math.min(maxMeses, 3);
+  const factorCredibilidad = credPass + credMeses;
 
   return clamp(
-    Math.round((factorIngresos + factorAhorro + factorCredibilidad) * 10) / 10,
+    Math.round((factorIngresos + factorAhorro + factorConsistencia + factorCredibilidad) * 10) / 10,
     0, 20,
   );
 }

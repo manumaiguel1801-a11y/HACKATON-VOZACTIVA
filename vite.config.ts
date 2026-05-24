@@ -32,13 +32,62 @@ function classifyTx(tx: BelvoTx) {
   return { tipo: 'otro', esVentaProbable: tx.amount < 50_000 };
 }
 
-// ─── Dev API plugin — serves /api/belvo-* when running `npm run dev` ───────────
+// ─── Dev API plugin — serves /api/* when running `npm run dev` ───────────────
 function devApiPlugin(env: Record<string, string>): Plugin {
   return {
     name: 'voz-activa-dev-api',
     configureServer(server) {
+      // Expose server-only keys to SSR modules loaded via ssrLoadModule
+      if (env.GEMINI_API_KEY) process.env.GEMINI_API_KEY = env.GEMINI_API_KEY;
+
       server.middlewares.use(async (req: IncomingMessage, res: ServerResponse, next) => {
         const url = new URL(req.url ?? '/', 'http://localhost');
+
+        // ── POST /api/extracto ─────────────────────────────────────────────
+        if (req.method === 'POST' && url.pathname === '/api/extracto') {
+          res.setHeader('Content-Type', 'application/json');
+          try {
+            const chunks: Buffer[] = [];
+            await new Promise<void>((resolve, reject) => {
+              req.on('data', (chunk: Buffer) => chunks.push(chunk));
+              req.on('end', resolve);
+              req.on('error', reject);
+            });
+            const body = JSON.parse(Buffer.concat(chunks).toString('utf-8'));
+            const mod = await server.ssrLoadModule('/api/_lib/extractoAnalysis.ts');
+            const result = await mod.analyzeExtractoFull(body.images ?? [], body.wasLocked ?? false);
+            res.writeHead(200);
+            res.end(JSON.stringify(result));
+          } catch (err: any) {
+            const msg: string = err?.message ?? 'Error interno';
+            const status = msg.includes('no es un extracto bancario') ? 422 : 500;
+            res.writeHead(status);
+            res.end(JSON.stringify({ error: msg }));
+          }
+          return;
+        }
+
+        // ── POST /api/passport-report ─────────────────────────────────────
+        if (req.method === 'POST' && url.pathname === '/api/passport-report') {
+          res.setHeader('Content-Type', 'application/json');
+          try {
+            const chunks: Buffer[] = [];
+            await new Promise<void>((resolve, reject) => {
+              req.on('data', (chunk: Buffer) => chunks.push(chunk));
+              req.on('end', resolve);
+              req.on('error', reject);
+            });
+            const body = JSON.parse(Buffer.concat(chunks).toString('utf-8'));
+            const mod = await server.ssrLoadModule('/api/_lib/passportAgent.ts');
+            const result = await mod.generatePassportReport(body);
+            res.writeHead(200);
+            res.end(JSON.stringify(result));
+          } catch (err: any) {
+            res.writeHead(500);
+            res.end(JSON.stringify({ error: err?.message ?? 'Error interno' }));
+          }
+          return;
+        }
 
         // ── POST /api/belvo-token ──────────────────────────────────────────
         if (req.method === 'POST' && url.pathname === '/api/belvo-token') {

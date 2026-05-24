@@ -110,10 +110,14 @@ export const PassportView = ({ isDarkMode, sales, expenses, debts, profile, user
         setExtractos(snap.docs.map(d => {
           const data = d.data();
           return {
-            totalIngresos:    data.totalIngresos    ?? 0,
-            totalGastos:      data.totalGastos      ?? 0,
-            porcentajeVentas: data.porcentajeVentas ?? 0,
-            passwordUnlocked: data.passwordUnlocked ?? false,
+            totalIngresos:           data.totalIngresos           ?? 0,
+            totalGastos:             data.totalGastos             ?? 0,
+            porcentajeVentas:        data.porcentajeVentas        ?? 0,
+            passwordUnlocked:        data.passwordUnlocked        ?? false,
+            consistenciaVentas:      data.consistenciaVentas      ?? undefined,
+            mesesConActividad:       data.mesesConActividad       ?? undefined,
+            promedioMensualIngresos: data.promedioMensualIngresos ?? undefined,
+            miniAnalisis:            data.miniAnalisis            ?? undefined,
           } as ExtractoSummary;
         }));
       } catch { /* silencioso */ }

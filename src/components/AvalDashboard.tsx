@@ -1,15 +1,18 @@
 import React, { useState, useRef, useEffect } from 'react';
 import {
-  ShieldCheck, FileText, Upload, CheckCircle2,
-  Lock, X,
+  ShieldCheck, Upload, CheckCircle2,
+  Lock, X, Trash2,
   FileCheck, AlertCircle, Sparkles, Loader2,
   TrendingUp, TrendingDown, ChevronDown, ChevronUp, Smartphone,
-  Info, LogOut,
+  Info, LogOut, Download,
 } from 'lucide-react';
-import { collection, addDoc, getDocs, deleteDoc, doc, serverTimestamp, query, orderBy, getDoc } from 'firebase/firestore';
+import { collection, addDoc, getDocs, deleteDoc, doc, getDoc, serverTimestamp, query, orderBy } from 'firebase/firestore';
 import { db } from '../firebase';
 import { cn } from '../lib/utils';
 import { analyzeExtracto, ExtractoAnalysis } from '../services/extractoService';
+import { generatePassportPDF } from '../services/pdfService';
+import { ExtractoSummary } from '../services/scoringService';
+import { UserProfile } from '../types';
 
 interface Props {
   isDarkMode: boolean;
@@ -27,6 +30,7 @@ interface UploadedFile {
   status: 'analizando' | 'analizado' | 'error';
   analysis?: ExtractoAnalysis;
   errorMsg?: string;
+  agentStep?: string;
 }
 
 
@@ -140,11 +144,12 @@ function ScoreBar({ value, color }: { value: number; color: string }) {
   );
 }
 
-function AnalysisCard({ analysis, isDarkMode, text, muted }: {
+function AnalysisCard({ analysis, isDarkMode, text, muted, onRemove }: {
   analysis: ExtractoAnalysis;
   isDarkMode: boolean;
   text: string;
   muted: string;
+  onRemove?: () => void;
 }) {
   const [showTx, setShowTx] = useState(false);
   const label = ENTIDAD_LABEL[analysis.entidad] ?? 'Extracto';
@@ -231,6 +236,19 @@ function AnalysisCard({ analysis, isDarkMode, text, muted }: {
           )}
         </div>
       )}
+
+      {onRemove && (
+        <button
+          onClick={onRemove}
+          className={cn(
+            'w-full flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-bold transition-all active:scale-[0.98]',
+            isDarkMode ? 'text-red-400/70 hover:bg-red-500/10 hover:text-red-400' : 'text-red-400 hover:bg-red-50',
+          )}
+        >
+          <Trash2 className="w-3.5 h-3.5" />
+          Eliminar análisis
+        </button>
+      )}
     </div>
   );
 }
@@ -241,29 +259,12 @@ export const AvalDashboard = ({ isDarkMode, cedula, userName, userId, onBack }: 
   const [showTips, setShowTips]           = useState(false);
   const [showCloseModal, setShowCloseModal] = useState(false);
   const [openBank, setOpenBank]           = useState<string | null>(null);
-  const [daysInApp, setDaysInApp]         = useState<number | null>(null);
+  const [isDownloading, setIsDownloading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const REQUIRED_DAYS = 30;
-  const canUpload = daysInApp === null || daysInApp >= REQUIRED_DAYS;
-  const daysLeft  = daysInApp !== null ? Math.max(0, REQUIRED_DAYS - daysInApp) : null;
-
-  // Cargar análisis guardados y días en la app al montar
+  // Cargar análisis guardados al montar
   useEffect(() => {
     const load = async () => {
-      try {
-        // Calcular días en la app desde createdAt del usuario
-        const userDoc = await getDoc(doc(db, 'users', userId));
-        if (userDoc.exists()) {
-          const raw = userDoc.data().createdAt;
-          const createdDate: Date = raw?.toDate ? raw.toDate() : new Date(raw);
-          const days = Math.floor((Date.now() - createdDate.getTime()) / 86_400_000);
-          setDaysInApp(days);
-        } else {
-          setDaysInApp(0);
-        }
-      } catch { setDaysInApp(0); }
-
       try {
         const col = collection(db, 'users', userId, 'extractos');
         const snap = await getDocs(query(col, orderBy('analyzedAt', 'desc')));
@@ -276,15 +277,18 @@ export const AvalDashboard = ({ isDarkMode, cedula, userName, userId, onBack }: 
             size: data.fileSize ?? '',
             status: 'analizado' as const,
             analysis: {
-              entidad:               data.entidad               ?? 'otro',
-              totalIngresos:         data.totalIngresos         ?? 0,
-              totalGastos:           data.totalGastos           ?? 0,
-              ingresosVentas:        data.ingresosVentas        ?? 0,
-              ingresosTransferencias:data.ingresosTransferencias?? 0,
-              porcentajeVentas:      data.porcentajeVentas      ?? 0,
-              transactions:          data.transactions          ?? [],
-              miniAnalisis:          data.miniAnalisis          ?? '',
-              passwordUnlocked:      data.passwordUnlocked      ?? false,
+              entidad:                data.entidad                ?? 'otro',
+              totalIngresos:          data.totalIngresos          ?? 0,
+              totalGastos:            data.totalGastos            ?? 0,
+              ingresosVentas:         data.ingresosVentas         ?? 0,
+              ingresosTransferencias: data.ingresosTransferencias ?? 0,
+              porcentajeVentas:       data.porcentajeVentas       ?? 0,
+              transactions:           data.transactions           ?? [],
+              miniAnalisis:           data.miniAnalisis           ?? '',
+              passwordUnlocked:       data.passwordUnlocked       ?? false,
+              consistenciaVentas:     data.consistenciaVentas     ?? 0,
+              mesesConActividad:      data.mesesConActividad      ?? 0,
+              promedioMensualIngresos:data.promedioMensualIngresos?? 0,
             },
           };
         });
@@ -298,27 +302,77 @@ export const AvalDashboard = ({ isDarkMode, cedula, userName, userId, onBack }: 
   const muted = isDarkMode ? 'text-white/40' : 'text-black/40';
   const text  = isDarkMode ? 'text-[#FDFBF0]' : 'text-[#2e2f2d]';
 
+  const handleDownloadPDF = async () => {
+    if (isDownloading || completedAnalyses.length === 0) return;
+    setIsDownloading(true);
+    try {
+      const userSnap = await getDoc(doc(db, 'users', userId));
+      const userData = userSnap.data();
+      const minimalProfile: UserProfile = {
+        firstName: userData?.firstName || userName || 'Usuario',
+        lastName:  userData?.lastName  || '',
+        idNumber:  cedula,
+        phone:     userData?.phone     || '',
+        birthDate: '',
+        createdAt: null,
+      };
+      const extractos: ExtractoSummary[] = completedAnalyses
+        .filter(f => f.analysis)
+        .map(f => ({
+          totalIngresos:           f.analysis!.totalIngresos,
+          totalGastos:             f.analysis!.totalGastos,
+          porcentajeVentas:        f.analysis!.porcentajeVentas,
+          passwordUnlocked:        f.analysis!.passwordUnlocked,
+          consistenciaVentas:      f.analysis!.consistenciaVentas,
+          mesesConActividad:       f.analysis!.mesesConActividad,
+          promedioMensualIngresos: f.analysis!.promedioMensualIngresos,
+          miniAnalisis:            f.analysis!.miniAnalisis,
+        }));
+      const { blob, filename } = await generatePassportPDF(
+        minimalProfile,
+        [], [], [],
+        userId,
+        undefined,
+        extractos,
+      );
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err: any) {
+      console.error('[AvalDashboard] Error generando PDF:', err);
+    } finally {
+      setIsDownloading(false);
+    }
+  };
+
   const maskedCedula = cedula.length > 4 ? '••••••' + cedula.slice(-4) : cedula;
   const completedAnalyses = uploadedFiles.filter(f => f.status === 'analizado' && f.analysis);
 
   const processFile = async (file: File, id: string) => {
     try {
-      const analysis = await analyzeExtracto(file, cedula);
-      // Guardar en Firestore
+      const analysis = await analyzeExtracto(file, cedula, (step) => {
+        setUploadedFiles(prev => prev.map(f => f.id === id ? { ...f, agentStep: step } : f));
+      });
       const col = collection(db, 'users', userId, 'extractos');
       const docRef = await addDoc(col, {
-        fileName:              file.name,
-        fileSize:              formatBytes(file.size),
-        analyzedAt:            serverTimestamp(),
-        entidad:               analysis.entidad,
-        totalIngresos:         analysis.totalIngresos,
-        totalGastos:           analysis.totalGastos,
-        ingresosVentas:        analysis.ingresosVentas,
-        ingresosTransferencias:analysis.ingresosTransferencias,
-        porcentajeVentas:      analysis.porcentajeVentas,
-        transactions:          analysis.transactions,
-        miniAnalisis:          analysis.miniAnalisis,
-        passwordUnlocked:      analysis.passwordUnlocked,
+        fileName:                file.name,
+        fileSize:                formatBytes(file.size),
+        analyzedAt:              serverTimestamp(),
+        entidad:                 analysis.entidad,
+        totalIngresos:           analysis.totalIngresos,
+        totalGastos:             analysis.totalGastos,
+        ingresosVentas:          analysis.ingresosVentas,
+        ingresosTransferencias:  analysis.ingresosTransferencias,
+        porcentajeVentas:        analysis.porcentajeVentas,
+        transactions:            analysis.transactions,
+        miniAnalisis:            analysis.miniAnalisis,
+        passwordUnlocked:        analysis.passwordUnlocked,
+        consistenciaVentas:      analysis.consistenciaVentas,
+        mesesConActividad:       analysis.mesesConActividad,
+        promedioMensualIngresos: analysis.promedioMensualIngresos,
       });
       setUploadedFiles(prev => prev.map(f =>
         f.id === id ? { ...f, status: 'analizado', analysis, docId: docRef.id } : f,
@@ -530,63 +584,37 @@ export const AvalDashboard = ({ isDarkMode, cedula, userName, userId, onBack }: 
           </div>
         )}
 
-        {/* Drop zone — bloqueado si no lleva 30 días */}
-        {!canUpload ? (
-          <div className={cn('rounded-xl p-5 flex flex-col items-center gap-3 text-center border-2 border-dashed', isDarkMode ? 'border-white/10 bg-white/3' : 'border-black/10 bg-black/2')}>
-            <div className={cn('w-12 h-12 rounded-2xl flex items-center justify-center', isDarkMode ? 'bg-white/8' : 'bg-gray-100')}>
-              <Lock className={cn('w-6 h-6', muted)} />
-            </div>
-            <div>
-              <p className={cn('text-sm font-black', text)}>Disponible en {daysLeft} día{daysLeft !== 1 ? 's' : ''}</p>
-              <p className={cn('text-xs mt-1 leading-snug', muted)}>
-                Necesitas 30 días de historial en Voz Activa para analizar tu extracto.
-              </p>
-            </div>
-            <div className="w-full space-y-1.5">
-              <div className="flex justify-between text-[10px] font-bold">
-                <span className={muted}>Día {daysInApp ?? 0} de 30</span>
-                <span className="text-[#B8860B]">{Math.round(((daysInApp ?? 0) / REQUIRED_DAYS) * 100)}%</span>
-              </div>
-              <div className={cn('w-full h-2 rounded-full overflow-hidden', isDarkMode ? 'bg-white/10' : 'bg-black/8')}>
-                <div
-                  className="h-full rounded-full bg-gradient-to-r from-[#B8860B] to-[#FFD700] transition-all duration-700"
-                  style={{ width: `${Math.min(((daysInApp ?? 0) / REQUIRED_DAYS) * 100, 100)}%` }}
-                />
-              </div>
-            </div>
+        {/* Drop zone — siempre activa */}
+        <div
+          onDragOver={e => { e.preventDefault(); setIsDragging(true); }}
+          onDragLeave={() => setIsDragging(false)}
+          onDrop={e => { e.preventDefault(); setIsDragging(false); handleFiles(e.dataTransfer.files); }}
+          onClick={() => fileInputRef.current?.click()}
+          className={cn(
+            'border-2 border-dashed rounded-xl p-6 flex flex-col items-center gap-2.5 cursor-pointer transition-all',
+            isDragging
+              ? 'border-[#B8860B] bg-[#B8860B]/10'
+              : isDarkMode
+                ? 'border-white/10 hover:border-[#B8860B]/40 hover:bg-[#B8860B]/5'
+                : 'border-black/10 hover:border-[#B8860B]/40 hover:bg-[#FFF8DC]/50',
+          )}
+        >
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".pdf"
+            multiple
+            className="hidden"
+            onChange={e => handleFiles(e.target.files)}
+          />
+          <div className={cn('w-12 h-12 rounded-2xl flex items-center justify-center', isDarkMode ? 'bg-white/8' : 'bg-[#FFF8DC]')}>
+            <Upload className="w-6 h-6 text-[#B8860B]" />
           </div>
-        ) : (
-          <div
-            onDragOver={e => { e.preventDefault(); setIsDragging(true); }}
-            onDragLeave={() => setIsDragging(false)}
-            onDrop={e => { e.preventDefault(); setIsDragging(false); handleFiles(e.dataTransfer.files); }}
-            onClick={() => fileInputRef.current?.click()}
-            className={cn(
-              'border-2 border-dashed rounded-xl p-6 flex flex-col items-center gap-2.5 cursor-pointer transition-all',
-              isDragging
-                ? 'border-[#B8860B] bg-[#B8860B]/10'
-                : isDarkMode
-                  ? 'border-white/10 hover:border-[#B8860B]/40 hover:bg-[#B8860B]/5'
-                  : 'border-black/10 hover:border-[#B8860B]/40 hover:bg-[#FFF8DC]/50',
-            )}
-          >
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept=".pdf"
-              multiple
-              className="hidden"
-              onChange={e => handleFiles(e.target.files)}
-            />
-            <div className={cn('w-12 h-12 rounded-2xl flex items-center justify-center', isDarkMode ? 'bg-white/8' : 'bg-[#FFF8DC]')}>
-              <Upload className="w-6 h-6 text-[#B8860B]" />
-            </div>
-            <div className="text-center">
-              <p className={cn('text-sm font-black', text)}>Toca para subir o arrastra aquí</p>
-              <p className={cn('text-xs mt-0.5', muted)}>Solo archivos PDF</p>
-            </div>
+          <div className="text-center">
+            <p className={cn('text-sm font-black', text)}>Toca para subir o arrastra aquí</p>
+            <p className={cn('text-xs mt-0.5', muted)}>Solo archivos PDF · Hasta 3 meses para mejor análisis</p>
           </div>
-        )}
+        </div>
 
         {/* File list */}
         {uploadedFiles.length > 0 && (
@@ -607,7 +635,7 @@ export const AvalDashboard = ({ isDarkMode, cedula, userName, userId, onBack }: 
                   <div className="flex-1 min-w-0">
                     <p className={cn('text-xs font-bold truncate', text)}>{f.name}</p>
                     <p className={cn('text-[10px]', f.status === 'analizando' ? 'text-[#B8860B]' : f.status === 'analizado' ? 'text-green-500' : 'text-red-400')}>
-                      {f.status === 'analizando' ? '⏳ Analizando con IA...'
+                      {f.status === 'analizando' ? (f.agentStep ?? '⏳ Analizando con IA...')
                         : f.status === 'analizado' ? `✓ Analizado · ${f.size}`
                         : `✗ ${f.errorMsg ?? 'Error al analizar'}`}
                     </p>
@@ -620,7 +648,7 @@ export const AvalDashboard = ({ isDarkMode, cedula, userName, userId, onBack }: 
                   </button>
                 </div>
                 {f.status === 'analizado' && f.analysis && (
-                  <AnalysisCard analysis={f.analysis} isDarkMode={isDarkMode} text={text} muted={muted} />
+                  <AnalysisCard analysis={f.analysis} isDarkMode={isDarkMode} text={text} muted={muted} onRemove={() => removeFile(f.id)} />
                 )}
               </div>
             ))}
@@ -641,36 +669,21 @@ export const AvalDashboard = ({ isDarkMode, cedula, userName, userId, onBack }: 
         </div>
       </div>
 
-      {/* Requisito 30 días */}
-      {daysInApp !== null && daysInApp < REQUIRED_DAYS && (
-        <div className={cn('rounded-2xl p-4 space-y-3', isDarkMode ? 'bg-[#1A1A1A]' : 'bg-white')}>
-          <div className="flex items-start gap-3">
-            <div className={cn('w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0', isDarkMode ? 'bg-[#B8860B]/15' : 'bg-[#FFF8DC]')}>
-              <FileText className="w-4.5 h-4.5 text-[#B8860B]" style={{ width: 18, height: 18 }} />
-            </div>
-            <div>
-              <p className={cn('text-sm font-black', text)}>Análisis de extracto</p>
-              <p className={cn('text-xs mt-0.5', muted)}>Disponible cuando completes 30 días en Voz Activa</p>
-            </div>
-          </div>
-          <div className="space-y-1.5">
-            <div className="flex justify-between items-center">
-              <span className={cn('text-xs font-bold', text)}>Tu progreso</span>
-              <span className="text-xs font-black text-[#B8860B]">
-                {daysInApp} / {REQUIRED_DAYS} días
-              </span>
-            </div>
-            <div className={cn('w-full h-2.5 rounded-full overflow-hidden', isDarkMode ? 'bg-white/10' : 'bg-black/8')}>
-              <div
-                className="h-full rounded-full bg-gradient-to-r from-[#B8860B] to-[#FFD700] transition-all duration-700"
-                style={{ width: `${Math.min((daysInApp / REQUIRED_DAYS) * 100, 100)}%` }}
-              />
-            </div>
-          </div>
-          <p className={cn('text-[11px] leading-snug', muted)}>
-            Te faltan <strong className={isDarkMode ? 'text-white/70' : 'text-[#2e2f2d]'}>{REQUIRED_DAYS - daysInApp} días</strong> para poder analizar tu extracto bancario. Sigue registrando tus ventas y gastos en la app.
-          </p>
-        </div>
+{completedAnalyses.length > 0 && (
+        <button
+          onClick={handleDownloadPDF}
+          disabled={isDownloading}
+          className={cn(
+            'w-full flex items-center justify-center gap-2.5 py-4 rounded-2xl font-black text-sm transition-all active:scale-[0.98]',
+            isDownloading
+              ? isDarkMode ? 'bg-[#B8860B]/20 text-white/30 cursor-not-allowed' : 'bg-[#B8860B]/20 text-black/30 cursor-not-allowed'
+              : 'bg-gradient-to-r from-[#B8860B] to-[#DAA520] text-white shadow-lg',
+          )}
+        >
+          {isDownloading
+            ? <><Loader2 className="w-4 h-4 animate-spin" />Generando pasaporte...</>
+            : <><Download className="w-4 h-4" />Descargar Pasaporte PDF</>}
+        </button>
       )}
 
       <div className={cn('rounded-2xl p-4 flex gap-3', isDarkMode ? 'bg-white/5' : 'bg-black/3')}>
