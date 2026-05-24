@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import {
   ShieldCheck, Eye, FileText, CheckCircle2, ArrowRight,
   Building2, Lock, Star, AlertCircle,
-  Fingerprint, BarChart3, ClipboardList, QrCode,
+  Fingerprint, BarChart3, ClipboardList, QrCode, LogOut,
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { AvalDashboard } from './AvalDashboard';
@@ -19,6 +19,7 @@ interface Props {
   identityVerified?: boolean;
   verifiedCedula?: string;
   verifiedName?: string;
+  onExit?: () => void;
 }
 
 type Step = 'info' | 'identity' | 'dashboard';
@@ -52,14 +53,15 @@ const INCLUDES = [
   { icon: Building2,     label: 'Carta de presentación',            desc: 'Redactada con lenguaje financiero formal' },
 ];
 
-const REQUIREMENTS = [
-  'Mínimo 30 días de actividad registrada en la app',
-  'Perfil completo con número de identificación',
-  'Al menos 10 ventas o movimientos registrados',
-  'Foto de perfil y datos básicos del negocio',
+const REQUIREMENTS: { text: string; key?: boolean }[] = [
+  { text: 'La mayoría de tus ingresos deben venir por vía de entidad financiera: transferencias, pagos QR, Nequi, Daviplata, Davivienda o Bancolombia. Los bancos no reconocen efectivo.', key: true },
+  { text: 'Mínimo 30 días de actividad registrada en la app' },
+  { text: 'Perfil completo con número de identificación' },
+  { text: 'Al menos 10 ventas o movimientos registrados' },
+  { text: 'Foto de perfil y datos básicos del negocio' },
 ];
 
-export const AvalView = ({ isDarkMode, userId, prefillCedula = '', profileBirthDate = '', userName = '', sales, identityVerified, verifiedCedula: savedCedula, verifiedName: savedName }: Props) => {
+export const AvalView = ({ isDarkMode, userId, prefillCedula = '', profileBirthDate = '', userName = '', sales, identityVerified, verifiedCedula: savedCedula, verifiedName: savedName, onExit }: Props) => {
   const [step, setStep]                     = useState<Step>(identityVerified ? 'dashboard' : 'info');
   const [verifiedName, setVerifiedName]     = useState(savedName || userName);
   const [verifiedCedula, setVerifiedCedula] = useState(savedCedula || prefillCedula);
@@ -111,6 +113,7 @@ export const AvalView = ({ isDarkMode, userId, prefillCedula = '', profileBirthD
   return (
     <div className="space-y-6 pb-10 animate-in fade-in slide-in-from-bottom-4 duration-500">
 
+
       {/* Hero */}
       <div className={cn(
         'relative overflow-hidden rounded-2xl px-6 pt-8 pb-10',
@@ -123,7 +126,7 @@ export const AvalView = ({ isDarkMode, userId, prefillCedula = '', profileBirthD
             <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-[#B8860B] to-[#FFD700] flex items-center justify-center text-black shadow-lg">
               <ShieldCheck className="w-5 h-5" />
             </div>
-            <span className="text-[10px] font-black uppercase tracking-widest text-[#B8860B]">Mi Aval · Verificación crediticia</span>
+            <span className="text-[10px] font-black uppercase tracking-widest text-[#B8860B]">Oportunidad para crédito · Verificación crediticia</span>
           </div>
           <h1 className="font-['Plus_Jakarta_Sans'] font-black text-3xl leading-tight mb-3" style={{ color: '#2e2f2d' }}>
             Hazte visible<br />para los bancos.
@@ -145,10 +148,10 @@ export const AvalView = ({ isDarkMode, userId, prefillCedula = '', profileBirthD
       <div className={card}>
         <div className="flex items-center gap-2 mb-3">
           <Eye className="w-4 h-4 text-[#B8860B]" />
-          <h2 className={cn("font-black text-base font-['Plus_Jakarta_Sans']", text)}>¿Qué es Mi Aval?</h2>
+          <h2 className={cn("font-black text-base font-['Plus_Jakarta_Sans']", text)}>¿Qué es Oportunidad para crédito?</h2>
         </div>
         <p className={cn('text-sm leading-relaxed', isDarkMode ? 'text-white/60' : 'text-[#5b5c5a]')}>
-          Miles de vendedores informales en Colombia tienen ingresos reales pero ningún banco los ve. <strong className={text}>Mi Aval</strong> traduce tu historial diario de ventas y gastos en un documento financiero formal, con la misma estructura que un banco espera ver.
+          Miles de vendedores informales en Colombia tienen ingresos reales pero ningún banco los ve. <strong className={text}>Oportunidad para crédito</strong> traduce tu historial diario de ventas y gastos en un documento financiero formal, con la misma estructura que un banco espera ver.
         </p>
         <p className={cn('text-sm leading-relaxed mt-3', isDarkMode ? 'text-white/60' : 'text-[#5b5c5a]')}>
           No reemplaza un salario, pero sí demuestra que tu negocio existe, genera ingresos consistentes y que eres una persona confiable.
@@ -205,10 +208,17 @@ export const AvalView = ({ isDarkMode, userId, prefillCedula = '', profileBirthD
         </div>
         <div className="space-y-2.5">
           {REQUIREMENTS.map((req) => (
-            <div key={req} className="flex items-start gap-3">
-              <CheckCircle2 className="w-4 h-4 text-[#B8860B] flex-shrink-0 mt-0.5" />
-              <p className={cn('text-sm', isDarkMode ? 'text-white/60' : 'text-[#5b5c5a]')}>{req}</p>
-            </div>
+            req.key ? (
+              <div key={req.text} className={cn('flex items-start gap-3 rounded-xl p-3 border-2', isDarkMode ? 'bg-[#B8860B]/10 border-[#B8860B]/30' : 'bg-[#FFF8DC] border-[#B8860B]/40')}>
+                <AlertCircle className="w-4 h-4 text-[#B8860B] flex-shrink-0 mt-0.5" />
+                <p className={cn('text-sm font-semibold leading-relaxed', isDarkMode ? 'text-[#FFD700]/90' : 'text-[#7a5c00]')}>{req.text}</p>
+              </div>
+            ) : (
+              <div key={req.text} className="flex items-start gap-3">
+                <CheckCircle2 className="w-4 h-4 text-[#B8860B] flex-shrink-0 mt-0.5" />
+                <p className={cn('text-sm', isDarkMode ? 'text-white/60' : 'text-[#5b5c5a]')}>{req.text}</p>
+              </div>
+            )
           ))}
         </div>
       </div>

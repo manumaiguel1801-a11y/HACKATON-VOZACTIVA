@@ -60,6 +60,16 @@ export const Layout = ({
   const [showSuggestions, setShowSuggestions] = React.useState(false);
   const [showNotifications, setShowNotifications] = React.useState(false);
   const [showLogoutConfirm, setShowLogoutConfirm] = React.useState(false);
+  const [notificationsRead, setNotificationsRead] = React.useState(false);
+
+  const notifCount = debts.filter(d => d.status !== 'pagada').length + inventory.filter(p => (p.cantidad ?? 0) < 5).length;
+  const prevNotifCount = React.useRef(notifCount);
+  React.useEffect(() => {
+    if (notifCount !== prevNotifCount.current) {
+      setNotificationsRead(false);
+      prevNotifCount.current = notifCount;
+    }
+  }, [notifCount]);
 
   const cleanName = userName.startsWith('Hola, ') ? userName.replace('Hola, ', '') : userName;
 
@@ -78,7 +88,7 @@ export const Layout = ({
     { tab: 'reporte',    icon: <FileText />,    label: 'Reporte' },
     { tab: 'camara',     icon: <Users />,       label: 'Deudas' },
     { tab: 'inventario', icon: <Package />,     label: 'Inventario' },
-    { tab: 'aval',       icon: <ShieldCheck />, label: 'Mi Aval', special: true },
+    { tab: 'aval',       icon: <ShieldCheck />, label: 'Oportunidad', special: true },
   ];
 
   return (
@@ -274,13 +284,13 @@ export const Layout = ({
           <div className="hidden md:flex items-center gap-3 mr-2">
             <div className="relative">
               <button
-                onClick={() => setShowNotifications(v => !v)}
+                onClick={() => { setShowNotifications(v => !v); setNotificationsRead(true); }}
                 className="relative text-gray-400 hover:text-gray-600 cursor-pointer transition-colors"
                 title="Notificaciones"
               >
                 <Bell className="w-5 h-5" />
-                {(debts.filter(d => d.status !== 'pagada').length > 0 || inventory.filter(p => (p.cantidad ?? 0) < 5).length > 0) && (
-                  <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-[#B8860B]" />
+                {notifCount > 0 && !notificationsRead && (
+                  <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-red-500" />
                 )}
               </button>
               {showNotifications && (
@@ -439,7 +449,7 @@ const SidebarButton = ({
     {label}
     {special && !active && (
       <span className="ml-auto text-[9px] font-black uppercase tracking-widest bg-[#B8860B] text-white px-1.5 py-0.5 rounded-full">
-        Nuevo
+        Beta
       </span>
     )}
   </button>

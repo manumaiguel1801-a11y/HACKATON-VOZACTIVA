@@ -1,5 +1,12 @@
 import { GoogleGenAI, Type } from '@google/genai';
+import * as pdfjsLib from 'pdfjs-dist';
 import { Sale } from '../types';
+
+// pdfjs worker — use the bundled legacy worker to avoid separate fetch
+pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
+  'pdfjs-dist/build/pdf.worker.min.mjs',
+  import.meta.url,
+).toString();
 
 export interface ExtractoTransaction {
   fecha: string;
@@ -17,10 +24,11 @@ export interface ExtractoAnalysis {
   ingresosTransferencias: number;
   porcentajeVentas: number;
   transactions: ExtractoTransaction[];
-  consistenciaConApp: number; // 0–100
-  scoreGeneral: number;       // 0–100
+  consistenciaConApp: number;
+  scoreGeneral: number;
   nivel: 'alto' | 'medio' | 'bajo';
   resumen: string;
+  passwordUnlocked: boolean;
 }
 
 const MODELS = ['gemini-2.5-flash', 'gemini-2.0-flash'];
@@ -31,13 +39,63 @@ function getClient() {
   return new GoogleGenAI({ apiKey: key });
 }
 
-async function fileToBase64(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve((reader.result as string).split(',')[1]);
-    reader.onerror = reject;
-    reader.readAsDataURL(file);
-  });
+/**
+ * Renders every page of a PDF to JPEG blobs.
+ * Tries with cedula password first; if it fails, tries without password.
+ * Returns the rendered image blobs and whether a password was needed.
+ */
+async function pdfToImages(
+  buffer: ArrayBuffer,
+  cedula: string,
+): Promise<{ images: Blob[]; wasLocked: boolean }> {
+  const cedulaDigits = cedula.replace(/\D/g, '');
+
+  async function render(password?: string): Promise<Blob[]> {
+    const loadingTask = pdfjsLib.getDocument({
+      data: new Uint8Array(buffer),
+      ...(password ? { password } : {}),
+    });
+    const pdfDoc = await loadingTask.promise;
+    const blobs: Blob[] = [];
+
+    for (let i = 1; i <= pdfDoc.numPages; i++) {
+      const page = await pdfDoc.getPage(i);
+      const viewport = page.getViewport({ scale: 2.0 });
+      const canvas = document.createElement('canvas');
+      canvas.width = viewport.width;
+      canvas.height = viewport.height;
+      const ctx = canvas.getContext('2d')!;
+      await page.render({ canvasContext: ctx as any, viewport, canvas }).promise;
+      const blob = await new Promise<Blob>((res, rej) =>
+        canvas.toBlob(b => (b ? res(b) : rej(new Error('canvas toBlob failed'))), 'image/jpeg', 0.92),
+      );
+      blobs.push(blob);
+    }
+    return blobs;
+  }
+
+  // Try with cédula password first (covers Nequi, Daviplata, etc.)
+  if (cedulaDigits) {
+    try {
+      const images = await render(cedulaDigits);
+      return { images, wasLocked: true };
+    } catch { /* wrong password or not protected — try next */ }
+  }
+
+  // Try without password (unprotected PDF)
+  try {
+    const images = await render();
+    return { images, wasLocked: false };
+  } catch (e: any) {
+    const msg = (e?.message ?? '').toLowerCase();
+    if (msg.includes('password')) {
+      throw new Error(
+        'El PDF está protegido y tu número de cédula no coincide con la contraseña. ' +
+        'Verifica que estás subiendo tu propio extracto.',
+      );
+    }
+    throw new Error('No se pudo leer el PDF. Verifica que el archivo no esté dañado.');
+  }
 }
 
 const SCHEMA = {
@@ -45,7 +103,9 @@ const SCHEMA = {
   responseSchema: {
     type: Type.OBJECT,
     properties: {
-      entidad: { type: Type.STRING },
+      esExtractoBancario: { type: Type.BOOLEAN },
+      motivoRechazo:      { type: Type.STRING },
+      entidad:            { type: Type.STRING },
       transactions: {
         type: Type.ARRAY,
         items: {
@@ -62,36 +122,45 @@ const SCHEMA = {
         },
       },
     },
-    required: ['entidad','transactions'],
+    required: ['esExtractoBancario'],
   },
 };
 
-const PROMPT = `Analiza este extracto bancario colombiano (Nequi, Daviplata, Davivienda, Bancolombia u otro).
+const PROMPT = `Eres un analista financiero especializado en documentos bancarios colombianos.
 
-Extrae TODAS las transacciones visibles y clasifica cada una con uno de estos tipos exactos:
-- "cobro_qr": pago recibido mediante código QR (el cliente escaneó tu QR para pagarte)
-- "transferencia_recibida": alguien te envió dinero directamente por su nombre
-- "transferencia_enviada": tú enviaste dinero a alguien
+─── PASO 1: VERIFICACIÓN DEL DOCUMENTO ───
+Determina si estas imágenes corresponden a un extracto bancario / estado de cuenta con historial de movimientos (Nequi, Daviplata, Davivienda, Bancolombia u otro banco o billetera digital colombiana).
+
+Un extracto válido contiene:
+• Lista de múltiples transacciones con fechas y montos
+• Saldo disponible o saldo inicial/final
+• Nombre del titular o número de cuenta
+
+NO es un extracto si es: comprobante de pago individual, factura, contrato, foto de producto, etc.
+
+Si NO es extracto válido:
+→ esExtractoBancario: false
+→ motivoRechazo: describe qué tipo de documento es
+→ transactions: []
+
+─── PASO 2: EXTRACCIÓN (solo si es extracto válido) ───
+→ esExtractoBancario: true
+→ Extrae TODAS las transacciones visibles
+
+Tipos exactos:
+- "cobro_qr": pago recibido por código QR
+- "transferencia_recibida": alguien te envió dinero
+- "transferencia_enviada": tú enviaste dinero
 - "retiro": retiro de cajero o efectivo
-- "pago_servicio": pago de un servicio (recargas, arriendo, servicios públicos)
+- "pago_servicio": pago de servicio
 - "otro": cualquier otra transacción
 
-Reglas para esVentaProbable:
-TRUE (es venta) cuando:
-  • Aparece "Cobro QR", "Pago QR", "QR" en la descripción
-  • Son pagos pequeños de diferentes personas en el mismo día
-  • La descripción menciona "cliente", "cobro de negocio", "pago de cliente"
-FALSE (NO es venta) cuando:
-  • Aparece un nombre propio específico en "Recibiste de [nombre]" o "Te enviaron"
-  • Es un monto redondo grande de una sola persona ($50.000, $100.000, $200.000)
-  • La descripción dice "préstamo", "te mando", "ayuda", "pa la comida"
-  • Es la misma persona que aparece repetidamente
+esVentaProbable = true: cobros QR, pagos de clientes, múltiples pagos pequeños en el mismo día
+esVentaProbable = false: nombre propio enviando dinero, montos redondos grandes, "préstamo", "ayuda"
 
-Monto: número entero en pesos colombianos, sin puntos ni $. Solo positivos.
-Solo registra transacciones de ingresos (entradas de dinero) y gastos relevantes.
-entidad: escríbela en minúsculas ("nequi", "daviplata", "davivienda", "bancolombia", "otro").`;
+monto: entero en pesos colombianos, sin puntos ni $. Solo positivos.
+entidad: "nequi", "daviplata", "davivienda", "bancolombia" o "otro".`;
 
-// Handles both DD/MM/YYYY (OCR) and YYYY-MM-DD (Belvo ISO)
 function toIsoDateKey(dateStr: string): string | null {
   if (!dateStr) return null;
   if (/^\d{4}-\d{2}-\d{2}/.test(dateStr)) return dateStr.substring(0, 10);
@@ -115,7 +184,6 @@ function crossReferenceWithApp(transactions: ExtractoTransaction[], sales: Sale[
   const days = Object.keys(extractoByDay);
   if (days.length === 0) return 40;
 
-  // Group app sales by day
   const appByDay: Record<string, number> = {};
   sales.forEach(s => {
     try {
@@ -126,30 +194,48 @@ function crossReferenceWithApp(transactions: ExtractoTransaction[], sales: Sale[
   });
 
   const shared = days.filter(d => appByDay[d]);
-  if (shared.length === 0) return 40; // no overlapping days — no evidence either way
+  if (shared.length === 0) return 40;
 
   let matches = 0;
   shared.forEach(d => {
     const ratio = Math.min(extractoByDay[d], appByDay[d]) / Math.max(extractoByDay[d], appByDay[d]);
-    if (ratio >= 0.4) matches++; // within 60% tolerance
+    if (ratio >= 0.4) matches++;
   });
 
   return Math.round((matches / shared.length) * 100);
 }
 
-export async function analyzeExtracto(file: File, sales: Sale[]): Promise<ExtractoAnalysis> {
-  const base64   = await fileToBase64(file);
-  const mimeType = file.type as any;
+async function blobToBase64(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve((reader.result as string).split(',')[1]);
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
+}
+
+export async function analyzeExtracto(file: File, sales: Sale[], cedula = ''): Promise<ExtractoAnalysis> {
+  const ext = file.name.split('.').pop()?.toLowerCase();
+  if (ext !== 'pdf') throw new Error('Solo se aceptan archivos PDF. Descarga el extracto en formato PDF desde tu banco.');
+
+  // Render PDF pages to images (handles password-protected PDFs with cédula)
+  const rawBuffer = await file.arrayBuffer();
+  const { images, wasLocked } = await pdfToImages(rawBuffer, cedula);
+
+  const client = getClient();
+
+  // Build parts: one inlineData per page image + the prompt
+  const imageParts = await Promise.all(
+    images.map(async (blob) => ({
+      inlineData: { mimeType: 'image/jpeg', data: await blobToBase64(blob) },
+    })),
+  );
 
   const contents = [{
     role: 'user' as const,
-    parts: [
-      { inlineData: { mimeType, data: base64 } },
-      { text: PROMPT },
-    ],
+    parts: [...imageParts, { text: PROMPT }],
   }];
 
-  const client = getClient();
   let response: any;
   let lastErr: any;
 
@@ -162,31 +248,38 @@ export async function analyzeExtracto(file: File, sales: Sale[]): Promise<Extrac
       lastErr = err;
     }
   }
-  if (!response) throw lastErr ?? new Error('No se pudo analizar el extracto');
 
-  const parsed = JSON.parse(response.text || '{}');
+  if (!response) throw lastErr ?? new Error('No se pudo analizar el extracto. Intenta de nuevo.');
+
+  let parsed: any = {};
+  try {
+    parsed = JSON.parse(response.text || '{}');
+  } catch {
+    throw new Error('La IA no pudo interpretar el archivo. Intenta de nuevo.');
+  }
+
+  if (parsed.esExtractoBancario === false) {
+    const motivo = parsed.motivoRechazo?.trim() || 'No contiene un historial de movimientos bancarios';
+    throw new Error(`Este archivo no es un extracto bancario válido. ${motivo}. Sube el PDF de tus movimientos de cuenta.`);
+  }
+
   const transactions: ExtractoTransaction[] = (parsed.transactions ?? []).filter((t: any) => t.monto > 0);
 
-  const ingresos = transactions.filter(t =>
-    ['cobro_qr','transferencia_recibida','otro'].includes(t.tipo)
-  );
-
-  const totalIngresos         = ingresos.reduce((s, t) => s + t.monto, 0);
-  const ingresosVentas        = ingresos.filter(t => t.esVentaProbable).reduce((s, t) => s + t.monto, 0);
+  const ingresos               = transactions.filter(t => ['cobro_qr','transferencia_recibida','otro'].includes(t.tipo));
+  const totalIngresos          = ingresos.reduce((s, t) => s + t.monto, 0);
+  const ingresosVentas         = ingresos.filter(t => t.esVentaProbable).reduce((s, t) => s + t.monto, 0);
   const ingresosTransferencias = totalIngresos - ingresosVentas;
-  const porcentajeVentas      = totalIngresos > 0 ? Math.round((ingresosVentas / totalIngresos) * 100) : 0;
-  const consistenciaConApp    = crossReferenceWithApp(transactions, sales);
-  const scoreGeneral          = Math.round(porcentajeVentas * 0.6 + consistenciaConApp * 0.4);
+  const porcentajeVentas       = totalIngresos > 0 ? Math.round((ingresosVentas / totalIngresos) * 100) : 0;
+  const consistenciaConApp     = crossReferenceWithApp(transactions, sales);
+  const scoreGeneral           = Math.round(porcentajeVentas * 0.6 + consistenciaConApp * 0.4);
   const nivel: 'alto' | 'medio' | 'bajo' = scoreGeneral >= 65 ? 'alto' : scoreGeneral >= 40 ? 'medio' : 'bajo';
 
-  const entidadLabel: Record<string, string> = {
+  const ENTIDAD_LABELS: Record<string, string> = {
     nequi: 'Nequi', daviplata: 'Daviplata',
     davivienda: 'Davivienda', bancolombia: 'Bancolombia',
   };
   const entidad = (parsed.entidad ?? 'otro').toLowerCase();
-  const label   = entidadLabel[entidad] ?? 'Extracto bancario';
-
-  const resumen = `El ${porcentajeVentas}% de los ingresos de ${label} corresponden a patrones de venta. Consistencia con Voz-Activa: ${consistenciaConApp}%.`;
+  const label   = ENTIDAD_LABELS[entidad] ?? 'Extracto bancario';
 
   return {
     entidad,
@@ -198,16 +291,16 @@ export async function analyzeExtracto(file: File, sales: Sale[]): Promise<Extrac
     consistenciaConApp,
     scoreGeneral,
     nivel,
-    resumen,
+    resumen: `El ${porcentajeVentas}% de los ingresos de ${label} corresponden a patrones de venta. Consistencia con Voz-Activa: ${consistenciaConApp}%.`,
+    passwordUnlocked: wasLocked,
   };
 }
 
-const ENTIDAD_LABELS: Record<string, string> = {
+const ENTIDAD_LABELS_EXPORT: Record<string, string> = {
   nequi: 'Nequi', daviplata: 'Daviplata',
   davivienda: 'Davivienda', bancolombia: 'Bancolombia',
 };
 
-/** Build a full ExtractoAnalysis from pre-classified transactions (Belvo path). */
 export function buildAnalysis(
   transactions: ExtractoTransaction[],
   entidad: string,
@@ -221,7 +314,7 @@ export function buildAnalysis(
   const consistenciaConApp  = crossReferenceWithApp(transactions, sales);
   const scoreGeneral        = Math.round(porcentajeVentas * 0.6 + consistenciaConApp * 0.4);
   const nivel: 'alto' | 'medio' | 'bajo' = scoreGeneral >= 65 ? 'alto' : scoreGeneral >= 40 ? 'medio' : 'bajo';
-  const label               = ENTIDAD_LABELS[entidad.toLowerCase()] ?? entidad;
+  const label               = ENTIDAD_LABELS_EXPORT[entidad.toLowerCase()] ?? entidad;
 
   return {
     entidad: entidad.toLowerCase(),
@@ -234,5 +327,6 @@ export function buildAnalysis(
     scoreGeneral,
     nivel,
     resumen: `El ${porcentajeVentas}% de los ingresos de ${label} son pagos directos verificados. Consistencia con Voz-Activa: ${consistenciaConApp}%.`,
+    passwordUnlocked: false,
   };
 }
