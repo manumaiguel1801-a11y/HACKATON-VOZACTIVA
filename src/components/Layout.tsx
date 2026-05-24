@@ -78,7 +78,6 @@ export const Layout = ({
     { tab: 'reporte',    icon: <FileText />,    label: 'Reporte' },
     { tab: 'camara',     icon: <Users />,       label: 'Deudas' },
     { tab: 'inventario', icon: <Package />,     label: 'Inventario' },
-    { tab: 'pasaporte',  icon: <Wallet />,      label: 'Pasaporte' },
     { tab: 'aval',       icon: <ShieldCheck />, label: 'Mi Aval', special: true },
   ];
 
@@ -442,7 +441,7 @@ const SidebarButton = ({
     )}
   >
     {React.cloneElement(icon as React.ReactElement, {
-      className: cn('w-5 h-5 flex-shrink-0', (active || special) && 'fill-current'),
+      className: 'w-5 h-5 flex-shrink-0',
     })}
     {label}
     {special && !active && (
@@ -476,7 +475,7 @@ const NavButton = ({
     )}
   >
     {React.cloneElement(icon as React.ReactElement, {
-      className: cn('w-6 h-6', active && 'fill-current'),
+      className: 'w-6 h-6',
     })}
     <span className="font-medium text-[10px] mt-1">{label}</span>
   </button>
