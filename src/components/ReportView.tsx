@@ -8,9 +8,10 @@ import jsPDF from 'jspdf';
 import { cn } from '../lib/utils';
 import { Sale, Expense, getSaleLabel } from '../types';
 import {
-  generateFinancialReport, ReportPeriod, ParsedReport, PERIOD_CONFIG,
+  ReportPeriod, ParsedReport, PERIOD_CONFIG,
   checkPeriodCompatibility, filterByPeriod,
 } from '../services/reportService';
+import { generateFinancialReport } from '../agentes/reporteAgente';
 
 interface Props {
   isDarkMode: boolean;

@@ -1,4 +1,3 @@
-import Anthropic from '@anthropic-ai/sdk';
 import { Sale, Expense } from '../types';
 
 export type ReportPeriod = 'hoy' | '7d' | '14d' | '21d' | 'mes' | '3m' | '6m' | 'all';
@@ -33,16 +32,16 @@ export interface ParsedReport {
 }
 
 const PIE_COLORS = ['#B8860B', '#3B82F6', '#8B5CF6', '#EF4444', '#22C55E', '#F59E0B'];
-const DAY_NAMES  = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
+export const DAY_NAMES  = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
 
-function getSaleDate(s: Sale): Date {
+export function getSaleDate(s: Sale): Date {
   return s.createdAt?.toDate ? s.createdAt.toDate() : new Date();
 }
-function getExpenseDate(e: Expense): Date {
+export function getExpenseDate(e: Expense): Date {
   return e.createdAt?.toDate ? e.createdAt.toDate() : new Date();
 }
 
-function getDateRange(period: ReportPeriod): { start: Date; label: string } {
+export function getDateRange(period: ReportPeriod): { start: Date; label: string } {
   const now = new Date();
 
   if (period === 'hoy') {
@@ -69,7 +68,7 @@ function getDateRange(period: ReportPeriod): { start: Date; label: string } {
   };
 }
 
-function computeChartData(sales: Sale[], expenses: Expense[], start: Date, period: ReportPeriod): ChartPoint[] {
+export function computeChartData(sales: Sale[], expenses: Expense[], start: Date, period: ReportPeriod): ChartPoint[] {
   const now = new Date();
 
   if (period === 'hoy') {
@@ -117,7 +116,7 @@ function computeChartData(sales: Sale[], expenses: Expense[], start: Date, perio
   return days;
 }
 
-function computePieData(expenses: Expense[], start: Date): PieSlice[] {
+export function computePieData(expenses: Expense[], start: Date): PieSlice[] {
   const map = new Map<string, number>();
   expenses.filter(e => getExpenseDate(e) >= start).forEach(e => {
     map.set(e.concept, (map.get(e.concept) ?? 0) + e.amount);
@@ -134,7 +133,7 @@ function computePieData(expenses: Expense[], start: Date): PieSlice[] {
   return slices;
 }
 
-function computeBestDay(sales: Sale[], start: Date): { name: string; amount: number } | null {
+export function computeBestDay(sales: Sale[], start: Date): { name: string; amount: number } | null {
   const map = new Map<string, number>();
   sales.filter(s => getSaleDate(s) >= start).forEach(s => {
     const key = DAY_NAMES[getSaleDate(s).getDay()];
@@ -199,199 +198,3 @@ export function filterByPeriod(sales: Sale[], expenses: Expense[], period: Repor
   };
 }
 
-// ─── Agent tools ──────────────────────────────────────────────────────────────
-
-const AGENT_TOOLS: Anthropic.Tool[] = [
-  {
-    name: 'get_period_metrics',
-    description: 'Obtiene ingresos, gastos, utilidad neta, margen y número de transacciones del período.',
-    input_schema: { type: 'object' as const, properties: {} },
-  },
-  {
-    name: 'compare_with_previous_period',
-    description: 'Compara el período actual con el anterior de la misma duración. Útil para detectar crecimiento o caída.',
-    input_schema: { type: 'object' as const, properties: {} },
-  },
-  {
-    name: 'get_expense_breakdown',
-    description: 'Desglose de gastos por categoría ordenado de mayor a menor con porcentaje del total.',
-    input_schema: { type: 'object' as const, properties: {} },
-  },
-  {
-    name: 'get_sales_trend',
-    description: 'Tendencia de ventas: mejor y peor día de la semana, promedio diario y días sin actividad.',
-    input_schema: { type: 'object' as const, properties: {} },
-  },
-];
-
-const STEP_LABELS: Record<string, string> = {
-  get_period_metrics:          'Calculando métricas del período...',
-  compare_with_previous_period:'Comparando con período anterior...',
-  get_expense_breakdown:       'Analizando distribución de gastos...',
-  get_sales_trend:             'Detectando tendencias de ventas...',
-};
-
-export async function generateFinancialReport(
-  sales: Sale[],
-  expenses: Expense[],
-  period: ReportPeriod,
-  userName?: string,
-  onStep?: (step: string) => void,
-): Promise<ParsedReport> {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) throw new Error('No hay ANTHROPIC_API_KEY configurada. Agrégala en .env.local');
-
-  const { start, label: periodoLabel } = getDateRange(period);
-  const fSales    = sales.filter(s => getSaleDate(s) >= start);
-  const fExpenses = expenses.filter(e => getExpenseDate(e) >= start);
-
-  const chartData = computeChartData(sales, expenses, start, period);
-  const pieData   = computePieData(expenses, start);
-  const bestDay   = computeBestDay(sales, start);
-
-  // ── Tool handlers ────────────────────────────────────────────────────────
-  function runTool(name: string): unknown {
-    if (name === 'get_period_metrics') {
-      const ingresos      = fSales.reduce((s, x) => s + x.total, 0);
-      const gastos        = fExpenses.reduce((s, x) => s + x.amount, 0);
-      return {
-        ingresos, gastos,
-        utilidad:      ingresos - gastos,
-        transacciones: fSales.length + fExpenses.length,
-        margen_pct:    ingresos > 0 ? Math.round(((ingresos - gastos) / ingresos) * 100) : 0,
-      };
-    }
-
-    if (name === 'compare_with_previous_period') {
-      const days = PERIOD_CONFIG[period].days;
-      if (!days) return { disponible: false, motivo: 'El período seleccionado no tiene duración fija para comparar' };
-
-      const prevEnd   = new Date(start);
-      const prevStart = new Date(start.getTime() - days * 86_400_000);
-      const pSales    = sales.filter(s => { const d = getSaleDate(s);    return d >= prevStart && d < prevEnd; });
-      const pExpenses = expenses.filter(e => { const d = getExpenseDate(e); return d >= prevStart && d < prevEnd; });
-      const prevIngr  = pSales.reduce((s, x) => s + x.total, 0);
-      const prevGast  = pExpenses.reduce((s, x) => s + x.amount, 0);
-      const curIngr   = fSales.reduce((s, x) => s + x.total, 0);
-      const curGast   = fExpenses.reduce((s, x) => s + x.amount, 0);
-      return {
-        disponible:              true,
-        ingresos_anterior:       prevIngr,
-        gastos_anterior:         prevGast,
-        variacion_ingresos_pct:  prevIngr > 0 ? Math.round(((curIngr - prevIngr) / prevIngr) * 100) : null,
-        variacion_gastos_pct:    prevGast > 0 ? Math.round(((curGast - prevGast) / prevGast) * 100) : null,
-      };
-    }
-
-    if (name === 'get_expense_breakdown') {
-      const map = new Map<string, number>();
-      fExpenses.forEach(e => map.set(e.concept, (map.get(e.concept) ?? 0) + e.amount));
-      const total = [...map.values()].reduce((a, b) => a + b, 0);
-      return {
-        total_gastos: total,
-        categorias: [...map.entries()]
-          .sort((a, b) => b[1] - a[1])
-          .slice(0, 6)
-          .map(([nombre, monto]) => ({ nombre, monto, pct: total > 0 ? Math.round((monto / total) * 100) : 0 })),
-      };
-    }
-
-    if (name === 'get_sales_trend') {
-      const dayMap = new Map<string, number>();
-      fSales.forEach(s => {
-        const key = DAY_NAMES[getSaleDate(s).getDay()];
-        dayMap.set(key, (dayMap.get(key) ?? 0) + s.total);
-      });
-      const sorted       = [...dayMap.entries()].sort((a, b) => b[1] - a[1]);
-      const totalDays    = Math.max(1, Math.ceil((Date.now() - start.getTime()) / 86_400_000));
-      const daysWithSales = new Set(fSales.map(s => getSaleDate(s).toDateString())).size;
-      const totalIngr    = fSales.reduce((s, x) => s + x.total, 0);
-      return {
-        mejor_dia:       sorted[0]                  ? { dia: sorted[0][0],                  monto: sorted[0][1] }                  : null,
-        peor_dia:        sorted[sorted.length - 1]  ? { dia: sorted[sorted.length - 1][0],  monto: sorted[sorted.length - 1][1] }  : null,
-        dias_con_ventas:  daysWithSales,
-        dias_sin_ventas:  totalDays - daysWithSales,
-        promedio_diario:  daysWithSales > 0 ? Math.round(totalIngr / daysWithSales) : 0,
-      };
-    }
-
-    return { error: 'Herramienta no encontrada' };
-  }
-
-  // ── Agent loop ────────────────────────────────────────────────────────────
-  const client = new Anthropic({ apiKey, dangerouslyAllowBrowser: true });
-
-  const system = `Eres un analista financiero experto en pequeños negocios informales colombianos.
-Analiza los datos del negocio${userName ? ` de ${userName}` : ''} para el período: ${periodoLabel}.
-Usa las herramientas disponibles para recopilar todos los datos que necesites.
-Cuando tengas suficiente información, responde ÚNICAMENTE con un JSON válido con esta estructura:
-{
-  "descripcion": "2 oraciones sobre el negocio y su comportamiento en el período",
-  "insights": [
-    {"titulo":"...","texto":"..."},
-    {"titulo":"...","texto":"..."},
-    {"titulo":"...","texto":"..."},
-    {"titulo":"...","texto":"..."}
-  ],
-  "recomendaciones": [
-    {"titulo":"...","texto":"..."},
-    {"titulo":"...","texto":"..."},
-    {"titulo":"...","texto":"..."},
-    {"titulo":"...","texto":"..."}
-  ],
-  "conclusion": "Una sola oración contundente sobre el estado del negocio"
-}
-REGLAS: usa cifras reales, sin markdown, sin asteriscos, texto plano, español colombiano directo.`;
-
-  const messages: Anthropic.MessageParam[] = [
-    { role: 'user', content: 'Genera el reporte financiero completo.' },
-  ];
-
-  onStep?.('Iniciando análisis del negocio...');
-
-  for (let i = 0; i < 10; i++) {
-    const resp = await client.messages.create({
-      model:      'claude-haiku-4-5-20251001',
-      max_tokens: 4096,
-      system,
-      tools:      AGENT_TOOLS,
-      messages,
-    });
-
-    messages.push({ role: 'assistant', content: resp.content });
-
-    if (resp.stop_reason === 'end_turn') {
-      onStep?.('Construyendo reporte...');
-      const text = (resp.content.find(b => b.type === 'text') as Anthropic.TextBlock | undefined)?.text ?? '';
-      const match = text.match(/\{[\s\S]*\}/);
-      if (!match) throw new Error('El agente no devolvió un JSON válido. Intenta de nuevo.');
-
-      const ai      = JSON.parse(match[0]);
-      const ingr    = fSales.reduce((s, x) => s + x.total, 0);
-      const gast    = fExpenses.reduce((s, x) => s + x.amount, 0);
-
-      return {
-        periodoLabel,
-        metrics: { ingresos: ingr, gastos: gast, utilidad: ingr - gast, transacciones: fSales.length + fExpenses.length },
-        chartData,
-        pieData,
-        bestDay,
-        descripcion:     ai.descripcion     ?? '',
-        insights:        ai.insights        ?? [],
-        recomendaciones: ai.recomendaciones ?? [],
-        conclusion:      ai.conclusion      ?? '',
-      };
-    }
-
-    if (resp.stop_reason === 'tool_use') {
-      const toolBlocks = resp.content.filter((b): b is Anthropic.ToolUseBlock => b.type === 'tool_use');
-      const results: Anthropic.ToolResultBlockParam[] = toolBlocks.map(b => {
-        onStep?.(STEP_LABELS[b.name] ?? `Ejecutando ${b.name}...`);
-        return { type: 'tool_result', tool_use_id: b.id, content: JSON.stringify(runTool(b.name)) };
-      });
-      messages.push({ role: 'user', content: results });
-    }
-  }
-
-  throw new Error('El agente no completó el análisis. Intenta de nuevo.');
-}
