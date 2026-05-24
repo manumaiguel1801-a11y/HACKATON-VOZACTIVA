@@ -9,7 +9,7 @@ import {
   MSG_ERROR_GENERIC,
   type WhatsAppService,
 } from './_lib/whatsapp/index.js';
-import { logEvent, getRecentLogs, formatLogsForWhatsApp } from './_lib/logger.js';
+import { logEvent, getRecentLogs, formatLogsForWhatsApp, readLogFileTail } from './_lib/logger.js';
 
 // ─── Firebase Admin init ──────────────────────────────────────────────────────
 function getAdminApp() {
@@ -75,6 +75,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (/^(\/logs|\/debug|logs|debug)$/i.test(text)) {
       const logs = await getRecentLogs(db, from, 15);
       await wa.reply(formatLogsForWhatsApp(logs), 'cmd-logs');
+      return;
+    }
+
+    if (/^(\/logfile|logfile)$/i.test(text)) {
+      const tail = await readLogFileTail(40);
+      const truncated = tail.length > 3500 ? tail.slice(-3500) : tail;
+      await wa.reply(`📄 *whatsapp.log* (últimas líneas)\n\n\`\`\`\n${truncated}\n\`\`\``, 'cmd-logfile');
       return;
     }
 

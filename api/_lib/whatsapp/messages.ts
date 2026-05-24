@@ -21,7 +21,8 @@ export const MSG_HELP = `📋 *¿Qué puedo registrar?*
 Registra exactamente como hablas — sin formatos especiales.
 
 _CANCELAR — cancela cualquier operación en curso_
-_/LOGS — muestra los últimos 15 eventos (debug)_`;
+_/LOGS — últimos 15 eventos desde Firestore (debug)_
+_/LOGFILE — tail del archivo whatsapp.log (debug)_`;
 
 export const MSG_ERROR_GENERIC = '⚠️ Hubo un error. Intenta de nuevo.';
 export const MSG_HELP_FALLBACK = 'No pude entender el mensaje. Ejemplo: "vendí 3 jugos a 3000".';

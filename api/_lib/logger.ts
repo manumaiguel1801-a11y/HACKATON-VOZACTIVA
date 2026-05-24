@@ -1,4 +1,6 @@
 import { FieldValue, type Firestore } from 'firebase-admin/firestore';
+import { appendFile, readFile } from 'node:fs/promises';
+import { join } from 'node:path';
 
 export type LogLevel = 'info' | 'warn' | 'error';
 export type LogDirection = 'in' | 'out' | 'event';
@@ -10,6 +12,44 @@ export interface LogEntry {
   stage: string;
   text?: string;
   context?: Record<string, unknown>;
+}
+
+/**
+ * File mirror — appends each log entry to whatsapp.log.
+ * - Local dev (no VERCEL env): writes to repo root so the file is visible
+ *   in the working tree (gitignored via *.log).
+ * - Vercel: writes to /tmp which is the only writable path. The file
+ *   persists across warm invocations on the same instance but is lost
+ *   on cold starts. Useful for tailing within a hot function lifetime.
+ */
+const LOG_DIR = process.env.VERCEL ? '/tmp' : process.cwd();
+const LOG_FILE = join(LOG_DIR, 'whatsapp.log');
+
+function formatLogLine(entry: LogEntry): string {
+  const ts = new Date().toISOString();
+  const phone = entry.phone ?? '-';
+  const text = (entry.text ?? '').replace(/\n/g, '\\n').slice(0, 500);
+  const ctx = entry.context ? ' ' + JSON.stringify(entry.context).slice(0, 400) : '';
+  return `[${ts}] [${entry.level.toUpperCase()}] ${entry.direction} ${entry.stage} ${phone} | ${text}${ctx}\n`;
+}
+
+async function mirrorToFile(entry: LogEntry): Promise<void> {
+  try {
+    await appendFile(LOG_FILE, formatLogLine(entry), 'utf8');
+  } catch (err: any) {
+    // Don't break the flow — fs may be read-only or path invalid
+    console.error('[logger] file mirror failed:', err?.message ?? err);
+  }
+}
+
+export async function readLogFileTail(lines = 50): Promise<string> {
+  try {
+    const content = await readFile(LOG_FILE, 'utf8');
+    const all = content.split('\n').filter(Boolean);
+    return all.slice(-lines).join('\n');
+  } catch (err: any) {
+    return `(no log file at ${LOG_FILE}: ${err?.message ?? err})`;
+  }
 }
 
 /**
@@ -30,6 +70,9 @@ export async function logEvent(db: Firestore, entry: LogEntry): Promise<void> {
   if (entry.level === 'error') console.error(prefix, JSON.stringify(payload));
   else if (entry.level === 'warn') console.warn(prefix, JSON.stringify(payload));
   else console.log(prefix, JSON.stringify(payload));
+
+  // File mirror (best-effort, never blocks the flow)
+  await mirrorToFile(entry);
 
   try {
     await db.collection('whatsappLogs').add({
