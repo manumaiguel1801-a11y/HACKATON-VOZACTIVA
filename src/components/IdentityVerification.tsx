@@ -2,6 +2,7 @@ import React, { useState, useRef } from 'react';
 import {
   IdCard, Camera, Upload, CheckCircle2, XCircle,
   Loader2, ChevronLeft, ShieldCheck, AlertCircle, RefreshCw,
+  Calendar,
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { analyzeCedulaImage, saveVerification, VerificationResult } from '../services/identityService';
@@ -17,28 +18,49 @@ interface Props {
 }
 
 export const IdentityVerification = ({ isDarkMode, userId, prefillCedula = '', onVerified, onBack }: Props) => {
-  const [step, setStep]           = useState<Step>('cedula');
-  const [cedula, setCedula]       = useState(prefillCedula);
+  const [step, setStep]               = useState<Step>('cedula');
+  const [cedula, setCedula]           = useState(prefillCedula);
+  const [birthDate, setBirthDate]     = useState('');
   const [cedulaError, setCedulaError] = useState('');
-  const [photoFile, setPhotoFile] = useState<File | null>(null);
+  const [birthError, setBirthError]   = useState('');
+  const [photoFile, setPhotoFile]     = useState<File | null>(null);
   const [photoPreview, setPhotoPreview] = useState('');
-  const [result, setResult]       = useState<VerificationResult | null>(null);
-  const [saving, setSaving]       = useState(false);
-  const fileInputRef              = useRef<HTMLInputElement>(null);
+  const [result, setResult]           = useState<VerificationResult | null>(null);
+  const [saving, setSaving]           = useState(false);
+  const fileInputRef                  = useRef<HTMLInputElement>(null);
 
   const text  = isDarkMode ? 'text-[#FDFBF0]' : 'text-[#2e2f2d]';
   const muted = isDarkMode ? 'text-white/40' : 'text-black/40';
   const card  = cn('rounded-2xl p-6', isDarkMode ? 'bg-[#1A1A1A]' : 'bg-white');
+  const inputBase = (error: boolean) => cn(
+    'w-full h-14 px-4 rounded-xl border-2 text-base font-bold outline-none transition-colors',
+    error
+      ? 'border-red-400 bg-red-50 text-red-700'
+      : isDarkMode
+        ? 'bg-[#0D0D0D] border-white/10 text-[#FDFBF0] placeholder:text-white/20 focus:border-[#B8860B]'
+        : 'bg-[#FDFBF0] border-black/10 text-[#2e2f2d] placeholder:text-black/25 focus:border-[#B8860B]',
+  );
 
-  // ── Step 1: ingresar cédula ──────────────────────────────────────────────
+  // ── Step 1 ───────────────────────────────────────────────────────────────
   const handleCedulaNext = () => {
-    const clean = cedula.replace(/\D/g, '');
-    if (clean.length < 6) { setCedulaError('Ingresa un número de cédula válido.'); return; }
-    setCedulaError('');
-    setStep('foto');
+    let ok = true;
+    const cleanNum = cedula.replace(/\D/g, '');
+    if (cleanNum.length < 6) {
+      setCedulaError('Ingresa un número de cédula válido.');
+      ok = false;
+    } else {
+      setCedulaError('');
+    }
+    if (!birthDate) {
+      setBirthError('Ingresa tu fecha de nacimiento.');
+      ok = false;
+    } else {
+      setBirthError('');
+    }
+    if (ok) setStep('foto');
   };
 
-  // ── Step 2: seleccionar foto ─────────────────────────────────────────────
+  // ── Step 2 ───────────────────────────────────────────────────────────────
   const handleFileSelect = (file: File) => {
     setPhotoFile(file);
     setPhotoPreview(URL.createObjectURL(file));
@@ -48,7 +70,7 @@ export const IdentityVerification = ({ isDarkMode, userId, prefillCedula = '', o
     if (!photoFile) return;
     setStep('analizando');
 
-    const res = await analyzeCedulaImage(photoFile, cedula);
+    const res = await analyzeCedulaImage(photoFile, cedula, birthDate);
     setResult(res);
 
     if (res.ok) {
@@ -75,7 +97,7 @@ export const IdentityVerification = ({ isDarkMode, userId, prefillCedula = '', o
   // ── Render ────────────────────────────────────────────────────────────────
   return (
     <div className="space-y-4 animate-in fade-in slide-in-from-bottom-4 duration-400 max-w-sm mx-auto">
-      {/* Back button */}
+      {/* Back */}
       {step !== 'analizando' && (
         <button
           onClick={step === 'cedula' ? onBack : () => setStep(step === 'foto' ? 'cedula' : 'foto')}
@@ -86,7 +108,7 @@ export const IdentityVerification = ({ isDarkMode, userId, prefillCedula = '', o
         </button>
       )}
 
-      {/* ── PASO 1: Cédula ─────────────────────────────────────────────── */}
+      {/* ── PASO 1: Cédula + Fecha ──────────────────────────────────────── */}
       {step === 'cedula' && (
         <div className={cn(card, 'space-y-5')}>
           <div className="flex flex-col items-center text-center gap-3">
@@ -96,11 +118,12 @@ export const IdentityVerification = ({ isDarkMode, userId, prefillCedula = '', o
             <div>
               <h2 className={cn("font-black text-xl font-['Plus_Jakarta_Sans']", text)}>Paso 1 de 2</h2>
               <p className={cn('text-sm mt-1', isDarkMode ? 'text-white/50' : 'text-[#5b5c5a]')}>
-                Ingresa tu número de cédula
+                Ingresa tus datos para verificar
               </p>
             </div>
           </div>
 
+          {/* Cédula */}
           <div className="space-y-1.5">
             <label className={cn('text-xs font-bold uppercase tracking-widest', muted)}>Número de cédula</label>
             <input
@@ -110,14 +133,7 @@ export const IdentityVerification = ({ isDarkMode, userId, prefillCedula = '', o
               onChange={e => { setCedula(e.target.value.replace(/\D/g, '')); setCedulaError(''); }}
               onKeyDown={e => e.key === 'Enter' && handleCedulaNext()}
               placeholder="Ej: 1020304050"
-              className={cn(
-                'w-full h-14 px-4 rounded-xl border-2 text-base font-bold outline-none transition-colors',
-                cedulaError
-                  ? 'border-red-400 bg-red-50 text-red-700'
-                  : isDarkMode
-                    ? 'bg-[#0D0D0D] border-white/10 text-[#FDFBF0] placeholder:text-white/20 focus:border-[#B8860B]'
-                    : 'bg-[#FDFBF0] border-black/10 text-[#2e2f2d] placeholder:text-black/25 focus:border-[#B8860B]'
-              )}
+              className={inputBase(!!cedulaError)}
             />
             {cedulaError && (
               <p className="text-xs font-medium text-red-500 flex items-center gap-1">
@@ -126,9 +142,27 @@ export const IdentityVerification = ({ isDarkMode, userId, prefillCedula = '', o
             )}
           </div>
 
+          {/* Fecha de nacimiento */}
+          <div className="space-y-1.5">
+            <label className={cn('text-xs font-bold uppercase tracking-widest', muted)}>
+              <span className="flex items-center gap-1.5"><Calendar className="w-3.5 h-3.5" />Fecha de nacimiento</span>
+            </label>
+            <input
+              type="date"
+              value={birthDate}
+              onChange={e => { setBirthDate(e.target.value); setBirthError(''); }}
+              className={cn(inputBase(!!birthError), 'appearance-none')}
+            />
+            {birthError && (
+              <p className="text-xs font-medium text-red-500 flex items-center gap-1">
+                <AlertCircle className="w-3.5 h-3.5" />{birthError}
+              </p>
+            )}
+          </div>
+
           <button
             onClick={handleCedulaNext}
-            className="w-full h-13 py-3.5 flex items-center justify-center rounded-xl font-black text-sm bg-gradient-to-r from-[#B8860B] to-[#DAA520] text-white shadow-md active:scale-[0.98] transition-all"
+            className="w-full py-3.5 flex items-center justify-center rounded-xl font-black text-sm bg-gradient-to-r from-[#B8860B] to-[#DAA520] text-white shadow-md active:scale-[0.98] transition-all"
           >
             Continuar →
           </button>
@@ -150,7 +184,6 @@ export const IdentityVerification = ({ isDarkMode, userId, prefillCedula = '', o
             </div>
           </div>
 
-          {/* Preview o zona de carga */}
           {photoPreview ? (
             <div className="relative rounded-xl overflow-hidden">
               <img src={photoPreview} alt="Cédula" className="w-full h-48 object-cover rounded-xl" />
@@ -168,7 +201,7 @@ export const IdentityVerification = ({ isDarkMode, userId, prefillCedula = '', o
                 'w-full h-40 border-2 border-dashed rounded-xl flex flex-col items-center justify-center gap-3 transition-colors',
                 isDarkMode
                   ? 'border-white/15 hover:border-[#B8860B]/50 hover:bg-[#B8860B]/5'
-                  : 'border-black/10 hover:border-[#B8860B]/40 hover:bg-[#FFF8DC]/50'
+                  : 'border-black/10 hover:border-[#B8860B]/40 hover:bg-[#FFF8DC]/50',
               )}
             >
               <div className={cn('w-12 h-12 rounded-xl flex items-center justify-center', isDarkMode ? 'bg-white/8' : 'bg-black/5')}>
@@ -190,7 +223,6 @@ export const IdentityVerification = ({ isDarkMode, userId, prefillCedula = '', o
             onChange={e => e.target.files?.[0] && handleFileSelect(e.target.files[0])}
           />
 
-          {/* Tips */}
           <div className={cn('rounded-xl p-3 space-y-1.5', isDarkMode ? 'bg-white/5' : 'bg-[#FFF8DC]')}>
             {['Fondo plano, buena luz', 'Cédula completa visible, sin cortes', 'Evita reflejos o sombras'].map(tip => (
               <p key={tip} className={cn('text-xs flex items-center gap-2', isDarkMode ? 'text-white/50' : 'text-[#5b5c5a]')}>
@@ -206,7 +238,7 @@ export const IdentityVerification = ({ isDarkMode, userId, prefillCedula = '', o
               'w-full py-3.5 rounded-xl font-black text-sm transition-all active:scale-[0.98]',
               photoFile
                 ? 'bg-gradient-to-r from-[#B8860B] to-[#DAA520] text-white shadow-md'
-                : isDarkMode ? 'bg-white/10 text-white/30' : 'bg-black/8 text-black/30'
+                : isDarkMode ? 'bg-white/10 text-white/30' : 'bg-black/8 text-black/30',
             )}
           >
             Verificar identidad
@@ -241,7 +273,6 @@ export const IdentityVerification = ({ isDarkMode, userId, prefillCedula = '', o
         <div className={cn(card, 'space-y-5')}>
           {result.ok ? (
             <>
-              {/* Éxito */}
               <div className="flex flex-col items-center text-center gap-3">
                 <div className="w-16 h-16 rounded-full bg-green-500/15 flex items-center justify-center">
                   <CheckCircle2 className="w-9 h-9 text-green-500" />
@@ -254,7 +285,6 @@ export const IdentityVerification = ({ isDarkMode, userId, prefillCedula = '', o
                 </div>
               </div>
 
-              {/* Datos extraídos */}
               <div className={cn('rounded-xl p-4 space-y-2', isDarkMode ? 'bg-green-500/10 border border-green-500/20' : 'bg-green-50 border border-green-200')}>
                 <div className="flex justify-between items-center">
                   <span className={cn('text-xs font-bold uppercase tracking-widest', muted)}>Nombre</span>
@@ -264,6 +294,12 @@ export const IdentityVerification = ({ isDarkMode, userId, prefillCedula = '', o
                   <span className={cn('text-xs font-bold uppercase tracking-widest', muted)}>Cédula</span>
                   <span className={cn('text-sm font-black', text)}>••••{result.extractedCedula?.slice(-4)}</span>
                 </div>
+                {result.extractedBirthDate && (
+                  <div className="flex justify-between items-center">
+                    <span className={cn('text-xs font-bold uppercase tracking-widest', muted)}>Nacimiento</span>
+                    <span className={cn('text-sm font-black', text)}>{result.extractedBirthDate}</span>
+                  </div>
+                )}
                 <div className="flex justify-between items-center">
                   <span className={cn('text-xs font-bold uppercase tracking-widest', muted)}>Confianza</span>
                   <span className="text-xs font-black text-green-600 uppercase">{result.confidence}</span>
@@ -288,7 +324,6 @@ export const IdentityVerification = ({ isDarkMode, userId, prefillCedula = '', o
             </>
           ) : (
             <>
-              {/* Error */}
               <div className="flex flex-col items-center text-center gap-3">
                 <div className="w-16 h-16 rounded-full bg-red-500/15 flex items-center justify-center">
                   <XCircle className="w-9 h-9 text-red-500" />

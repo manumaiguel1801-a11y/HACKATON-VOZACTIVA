@@ -1,4 +1,4 @@
-import { GoogleGenAI } from '@google/genai';
+import { GoogleGenAI, Type } from '@google/genai';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { doc, updateDoc, serverTimestamp } from 'firebase/firestore';
 import { storage, db } from '../firebase';
@@ -7,9 +7,12 @@ export interface VerificationResult {
   ok: boolean;
   extractedCedula?: string;
   extractedName?: string;
+  extractedBirthDate?: string;
   confidence: 'alta' | 'media' | 'baja';
   message: string;
 }
+
+const MODELS = ['gemini-2.5-flash', 'gemini-2.0-flash'];
 
 function getClient(): GoogleGenAI {
   const key = process.env.GEMINI_API_KEY;
@@ -21,54 +24,77 @@ function normalizeNum(s: string): string {
   return s.replace(/[\s.\-,]/g, '');
 }
 
-/** Convert File to base64 string */
+function normalizeDateStr(s: string): string {
+  // Accepts YYYY-MM-DD, DD/MM/YYYY, DD-MM-YYYY → returns DDMMYYYY digits only
+  if (!s) return '';
+  return s.replace(/[\s.\-\/]/g, '');
+}
+
 async function fileToBase64(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
-    reader.onload = () => {
-      const result = reader.result as string;
-      // Remove the data URL prefix (e.g. "data:image/jpeg;base64,")
-      resolve(result.split(',')[1]);
-    };
+    reader.onload = () => resolve((reader.result as string).split(',')[1]);
     reader.onerror = reject;
     reader.readAsDataURL(file);
   });
 }
 
-/** Ask Gemini Vision to read the cédula document */
-export async function analyzeCedulaImage(file: File, enteredCedula: string): Promise<VerificationResult> {
-  const client = getClient();
-  const base64 = await fileToBase64(file);
+const CEDULA_SCHEMA = {
+  responseMimeType: 'application/json' as const,
+  responseSchema: {
+    type: Type.OBJECT,
+    properties: {
+      cedula:           { type: Type.STRING },
+      nombre:           { type: Type.STRING },
+      fechaNacimiento:  { type: Type.STRING },
+      esDocumentoValido:{ type: Type.BOOLEAN },
+    },
+    required: ['cedula', 'nombre', 'fechaNacimiento', 'esDocumentoValido'],
+  },
+};
+
+export async function analyzeCedulaImage(
+  file: File,
+  enteredCedula: string,
+  enteredBirthDate: string,
+): Promise<VerificationResult> {
+  const client  = getClient();
+  const base64  = await fileToBase64(file);
   const mimeType = file.type as 'image/jpeg' | 'image/png' | 'image/webp';
 
   const prompt = `Analiza esta imagen de una cédula de ciudadanía colombiana.
 Extrae únicamente:
 1. El número de cédula (solo dígitos, sin puntos ni espacios)
 2. El nombre completo de la persona
+3. La fecha de nacimiento en formato DD/MM/YYYY
 
-Responde SOLO con JSON válido, sin markdown, sin explicación:
-{"cedula": "1234567890", "nombre": "JUAN CARLOS PEREZ GOMEZ", "esDocumentoValido": true}
+Si la imagen no es una cédula colombiana válida o no se pueden leer los datos, devuelve esDocumentoValido: false y los demás campos vacíos.`;
 
-Si la imagen no es una cédula o no se pueden leer los datos, responde:
-{"cedula": "", "nombre": "", "esDocumentoValido": false}`;
+  const contents = [{
+    role: 'user' as const,
+    parts: [
+      { inlineData: { mimeType, data: base64 } },
+      { text: prompt },
+    ],
+  }];
 
   try {
-    const response = await client.models.generateContent({
-      model: 'gemini-2.0-flash',
-      contents: [
-        {
-          role: 'user',
-          parts: [
-            { inlineData: { mimeType, data: base64 } },
-            { text: prompt },
-          ],
-        },
-      ],
-    });
+    const client2 = getClient();
+    let response: any;
+    let lastErr: any;
 
-    const raw = response.text?.trim() ?? '';
-    const jsonStr = raw.replace(/```json|```/g, '').trim();
-    const parsed = JSON.parse(jsonStr);
+    for (const model of MODELS) {
+      try {
+        response = await client2.models.generateContent({ model, contents, config: CEDULA_SCHEMA });
+        break;
+      } catch (err: any) {
+        console.warn(`[IdentityService] ${model} falló:`, err?.message ?? err);
+        lastErr = err;
+      }
+    }
+    if (!response) throw lastErr;
+
+    const parsed = JSON.parse(response.text || '{}');
 
     if (!parsed.esDocumentoValido) {
       return {
@@ -78,17 +104,34 @@ Si la imagen no es una cédula o no se pueden leer los datos, responde:
       };
     }
 
-    const extractedNum = normalizeNum(parsed.cedula ?? '');
-    const enteredNum   = normalizeNum(enteredCedula);
-    const match = extractedNum === enteredNum;
+    const extractedNum  = normalizeNum(parsed.cedula ?? '');
+    const enteredNum    = normalizeNum(enteredCedula);
+    const cedulaMatch   = extractedNum === enteredNum;
 
-    if (!match) {
+    const extractedDate = normalizeDateStr(parsed.fechaNacimiento ?? '');
+    const enteredDate   = normalizeDateStr(enteredBirthDate);
+    // If user didn't enter a date we skip that check
+    const dateMatch     = !enteredDate || extractedDate === enteredDate;
+
+    if (!cedulaMatch) {
       return {
         ok: false,
         extractedCedula: extractedNum,
         extractedName: parsed.nombre,
+        extractedBirthDate: parsed.fechaNacimiento,
         confidence: 'alta',
-        message: `El número de la cédula (${extractedNum}) no coincide con el que ingresaste (${enteredNum}). Verifica e intenta de nuevo.`,
+        message: `El número de cédula en el documento (${extractedNum}) no coincide con el que ingresaste (${enteredNum}).`,
+      };
+    }
+
+    if (!dateMatch) {
+      return {
+        ok: false,
+        extractedCedula: extractedNum,
+        extractedName: parsed.nombre,
+        extractedBirthDate: parsed.fechaNacimiento,
+        confidence: 'alta',
+        message: `La fecha de nacimiento en el documento (${parsed.fechaNacimiento}) no coincide con la que ingresaste.`,
       };
     }
 
@@ -96,6 +139,7 @@ Si la imagen no es una cédula o no se pueden leer los datos, responde:
       ok: true,
       extractedCedula: extractedNum,
       extractedName: parsed.nombre,
+      extractedBirthDate: parsed.fechaNacimiento,
       confidence: 'alta',
       message: `Identidad verificada. Bienvenido, ${parsed.nombre}.`,
     };
@@ -110,18 +154,15 @@ Si la imagen no es una cédula o no se pueden leer los datos, responde:
   }
 }
 
-/** Upload the cédula photo and save verification status to Firestore */
 export async function saveVerification(
   userId: string,
   file: File,
   result: VerificationResult,
 ): Promise<void> {
-  // Upload photo to Firebase Storage
   const storageRef = ref(storage, `users/${userId}/cedula.jpg`);
   await uploadBytes(storageRef, file);
   const photoURL = await getDownloadURL(storageRef);
 
-  // Save verification status on user doc
   await updateDoc(doc(db, 'users', userId), {
     identityVerified: result.ok,
     identityVerifiedAt: result.ok ? serverTimestamp() : null,
