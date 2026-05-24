@@ -1,4 +1,4 @@
-import { GoogleGenAI } from '@google/genai';
+import { GoogleGenAI, Type } from '@google/genai';
 import { Meta, ConsejeroMessage } from '../types';
 import { FinancialContext } from './financialAnalysis';
 
@@ -171,7 +171,44 @@ REGLAS:
 6. Si el checklist indica actividad en días sin confirmar, pregunta si fue olvido de registro — no asumas incumplimiento.
 7. Celebra logros con entusiasmo genuino: rachas, hitos 25/50/75%, meta completada.
 8. Usa pesos colombianos. Sé específico: no digas "un poco más", di "$12.000 más".
-9. Al proponer reajuste, siempre da números reales calculados con el contexto actual.`;
+9. Al proponer reajuste, siempre da números reales calculados con el contexto actual.
+
+ACCIÓN ESPECIAL — CREAR META:
+Cuando en la conversación quede claro el nombre/propósito, el monto objetivo y el plazo en días de una meta de ahorro, y el usuario lo haya confirmado (o lo haya dicho de una vez), incluye AL FINAL de tu respuesta — después de tu texto normal — exactamente este marcador en una línea aparte:
+[CREAR_META:{"nombre":"...","montoObjetivo":...,"dias":...}]
+- "nombre": propósito breve, ej: "nevera nueva", "moto", "arriendo del local"
+- "montoObjetivo": número entero en pesos colombianos
+- "dias": número entero de días
+Conversiones: "2 meses"=60, "3 meses"=90, "mes y medio"=45, "500k"/"500 mil"/"500 lucas"=500000, "1 millón"=1000000.
+Solo incluye el marcador cuando tengas los 3 datos completos y confirmados. Si el usuario no ha dado el plazo, pregúntaselo antes de incluir el marcador.`;
+}
+
+const META_MARKER_RE = /\[CREAR_META:(\{[^}]+\})\]/;
+
+export function parseMetaFromResponse(response: string): {
+  cleanText: string;
+  meta: { nombre: string; montoObjetivo: number; dias: number } | null;
+} {
+  const match = response.match(META_MARKER_RE);
+  if (!match) return { cleanText: response, meta: null };
+
+  const cleanText = response.replace(match[0], '').trim();
+  try {
+    const parsed = JSON.parse(match[1]);
+    if (parsed.nombre && parsed.montoObjetivo > 0 && parsed.dias > 0) {
+      return {
+        cleanText,
+        meta: {
+          nombre: String(parsed.nombre),
+          montoObjetivo: Number(parsed.montoObjetivo),
+          dias: Math.round(Number(parsed.dias)),
+        },
+      };
+    }
+  } catch {
+    // marcador malformado — ignorar
+  }
+  return { cleanText, meta: null };
 }
 
 export async function sendMessageToConsejero(

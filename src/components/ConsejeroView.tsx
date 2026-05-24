@@ -5,7 +5,7 @@ import {
   TrendingDown, Clock, CheckCircle2, Loader2, X, CalendarDays,
   PiggyBank, MessageCircle,
 } from 'lucide-react';
-import { doc, collection, addDoc, updateDoc, setDoc, getDoc, Timestamp } from 'firebase/firestore';
+import { doc, collection, addDoc, updateDoc, setDoc, getDoc, deleteDoc, Timestamp } from 'firebase/firestore';
 import { BarChart, Bar, XAxis, YAxis, ResponsiveContainer, ReferenceLine, Tooltip } from 'recharts';
 import { db } from '../firebase';
 import { cn } from '../lib/utils';
@@ -14,7 +14,7 @@ import {
   InventoryProduct, UserProfile, RegistroDiario, MetaAjuste,
 } from '../types';
 import { computeFinancialContext } from '../services/financialAnalysis';
-import { sendMessageToConsejero, getUnconfirmedDays } from '../services/consejeroService';
+import { sendMessageToConsejero, getUnconfirmedDays, parseMetaFromResponse } from '../services/consejeroService';
 import { populateTestData } from '../testData';
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -22,6 +22,20 @@ import { populateTestData } from '../testData';
 function fmt(n: number) { return `$${Math.round(n).toLocaleString('es-CO')}`; }
 function todayStr() { return new Date().toISOString().split('T')[0]; }
 function genId() { return `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`; }
+type ConsejeroAction = 'delete-meta' | 'complete-meta' | null;
+
+function detectMetaAction(text: string): ConsejeroAction {
+  const t = text.toLowerCase();
+  const wantsDelete =
+    /\b(elimin[ao]|borr[ao]|quit[ao]|sac[ao]|cancel[ao])\b/.test(t) &&
+    /\bmeta\b/.test(t);
+  const wantsComplete =
+    /\b(ya (cumpl|logr|alcanc)|ya la (cumpli|logré|alcancé)|me regalaron|ya tengo|la consegui|la conseguí|complet[eé]|ya no la necesit)\b/.test(t);
+  if (wantsDelete) return 'delete-meta';
+  if (wantsComplete) return 'complete-meta';
+  return null;
+}
+
 function getMondayStr(date: Date): string {
   const d = new Date(date); d.setHours(0, 0, 0, 0);
   const dow = d.getDay();
@@ -31,8 +45,46 @@ function getMondayStr(date: Date): string {
 
 type InternalTab = 'chat' | 'meta';
 
-// Survives tab switches, resets on page reload
-let proactiveGeneratedThisSession = false;
+// ─── Local tip (no Gemini call) ─────────────────────────────────────────────
+
+function getLocalTip(
+  ctx: ReturnType<typeof computeFinancialContext>,
+  meta: Meta | null,
+  unconfirmedCount: number,
+): { tip: string; cta: string } | null {
+  if (meta && unconfirmedCount >= 7) {
+    return {
+      tip: `Llevas ${unconfirmedCount} días sin confirmar tu ahorro en "${meta.nombre}". La meta está en riesgo.`,
+      cta: 'Revisemos juntos',
+    };
+  }
+  if (meta && unconfirmedCount >= 3) {
+    return {
+      tip: `Tienes ${unconfirmedCount} días pendientes en "${meta.nombre}". ¿Pudiste ahorrar esos días o se te olvidó registrar?`,
+      cta: '¿Qué opciones tengo?',
+    };
+  }
+  if (ctx.fiadoMas30Dias && ctx.fiadosPendientes.length > 0) {
+    const top = ctx.fiadosPendientes[0];
+    return {
+      tip: `${top.nombre} te debe $${top.monto.toLocaleString('es-CO')} hace más de ${top.diasPendiente} días. Puede afectar tu flujo de caja.`,
+      cta: 'Ayúdame a cobrarlos',
+    };
+  }
+  if (ctx.ventasBajaron30) {
+    return {
+      tip: 'Tus ventas bajaron más del 30% esta semana. Puede que haya algo que ajustar.',
+      cta: 'Analicemos qué pasó',
+    };
+  }
+  if (ctx.rachaPositiva7) {
+    return {
+      tip: `¡Llevas ${ctx.rachaDiasRegistrando} días seguidos registrando! Así se construye un negocio sano.`,
+      cta: 'Ver cómo voy',
+    };
+  }
+  return null;
+}
 
 // ─── ConsejeroAvatar ─────────────────────────────────────────────────────────
 
@@ -647,7 +699,7 @@ export const ConsejeroView = ({
   const [loadingTestData, setLoadingTestData] = useState(false);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const proactiveCheckedRef = useRef(false);
+  const [tipDismissed, setTipDismissed] = useState(false);
 
   const firstName = profile?.firstName || 'amigo';
 
@@ -663,6 +715,17 @@ export const ConsejeroView = ({
 
   const unconfirmedCount = activeMeta ? getUnconfirmedDays(activeMeta).length : 0;
   const showAdjustment = !adjustmentChosen && unconfirmedCount >= 7;
+
+  const hasAlerts =
+    (activeMeta && unconfirmedCount >= 3) ||
+    financialContext.fiadoMas30Dias ||
+    financialContext.ventasBajaron30 ||
+    financialContext.rachaPositiva7;
+
+  const localTip = useMemo(
+    () => getLocalTip(financialContext, activeMeta, unconfirmedCount),
+    [financialContext, activeMeta, unconfirmedCount],
+  );
 
   // ── Derived meta stats ──
   const metaPct = activeMeta
@@ -736,36 +799,6 @@ export const ConsejeroView = ({
     await setDoc(doc(db, 'users', userId), { consejeroHistory: msgs.slice(-30) }, { merge: true }).catch(console.error);
   }, [userId]);
 
-  // ── Proactive check ──
-  useEffect(() => {
-    if (!historyLoaded || proactiveCheckedRef.current || proactiveGeneratedThisSession) return;
-    proactiveCheckedRef.current = true;
-
-    const hasAlerts =
-      (activeMeta && unconfirmedCount >= 3) ||
-      financialContext.fiadoMas30Dias ||
-      financialContext.ventasBajaron30 ||
-      financialContext.rachaPositiva7;
-
-    if (!hasAlerts) return;
-    proactiveGeneratedThisSession = true;
-    setIsLoading(true);
-
-    const trigger = `[PROACTIVO] El usuario acaba de abrir el Consejero. Inicia la conversación basándote en el checklist. Si hay días sin confirmar y el checklist indica actividad esos días, menciona que puede ser olvido de registro. Saluda por nombre (${firstName}) con una oración, luego ve al tema principal.`;
-
-    let text = '';
-    sendMessageToConsejero(trigger, [], financialContext, activeMeta, firstName, true, chunk => {
-      text += chunk; setStreamingText(text);
-    })
-      .then(fullText => {
-        const msg: ConsejeroMessage = { id: genId(), role: 'assistant', content: fullText, timestamp: Date.now() };
-        setMessages(prev => { const u = [...prev, msg]; saveHistory(u); return u; });
-        setStreamingText(''); setIsLoading(false);
-      })
-      .catch(() => { setStreamingText(''); setIsLoading(false); });
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [historyLoaded]);
-
   // ── Send message (always switches to chat tab) ──
   const handleSend = useCallback(async (text: string) => {
     if (!text.trim() || isLoading) return;
@@ -779,17 +812,45 @@ export const ConsejeroView = ({
       const full = await sendMessageToConsejero(text.trim(), withUser, financialContext, activeMeta, firstName, false, chunk => {
         partial += chunk; setStreamingText(partial);
       });
-      const assistantMsg: ConsejeroMessage = { id: genId(), role: 'assistant', content: full, timestamp: Date.now() };
+      // Extraer marcador de meta del texto de Gemini antes de mostrarlo
+      const { cleanText, meta: confirmedMeta } = parseMetaFromResponse(full);
+
+      const assistantMsg: ConsejeroMessage = { id: genId(), role: 'assistant', content: cleanText, timestamp: Date.now() };
       const final = [...withUser, assistantMsg];
-      setMessages(final); await saveHistory(final);
+      setMessages(final);
+      saveHistory(final).catch(console.error);
+
+      // Agente: ejecutar acción si el usuario lo pidió
+      if (activeMeta) {
+        const action = detectMetaAction(text.trim());
+        if (action === 'delete-meta') {
+          await deleteDoc(doc(db, 'users', userId, 'metas', activeMeta.id)).catch(console.error);
+        } else if (action === 'complete-meta') {
+          await updateDoc(doc(db, 'users', userId, 'metas', activeMeta.id), { estado: 'completada' }).catch(console.error);
+        }
+      }
+
+      // Crear meta si Gemini incluyó el marcador y no hay una activa
+      if (!activeMeta && confirmedMeta) {
+        const { nombre, montoObjetivo, dias } = confirmedMeta;
+        const ahorroDiario = Math.ceil(montoObjetivo / dias);
+        const fi = new Date();
+        const fo = new Date(); fo.setDate(fo.getDate() + dias);
+        addDoc(collection(db, 'users', userId, 'metas'), {
+          nombre, montoObjetivo, montoAhorrado: 0, ahorroDiario, frecuencia: 'diario',
+          fechaInicio: Timestamp.fromDate(fi), fechaObjetivo: Timestamp.fromDate(fo),
+          estado: 'activa', registros: [{ fecha: todayStr(), estado: 'sin_confirmar' }], historialAjustes: [],
+        }).then(() => setInternalTab('meta')).catch(console.error);
+      }
     } catch {
       const err: ConsejeroMessage = { id: genId(), role: 'assistant', content: 'Hubo un problema para conectar. Verifica tu conexión e intenta de nuevo.', timestamp: Date.now() };
       const final = [...withUser, err];
-      setMessages(final); await saveHistory(final);
+      setMessages(final);
+      saveHistory(final).catch(console.error);
     } finally {
       setStreamingText(''); setIsLoading(false);
     }
-  }, [messages, isLoading, financialContext, activeMeta, firstName, saveHistory]);
+  }, [messages, isLoading, financialContext, activeMeta, firstName, saveHistory, userId]);
 
   // ── Adjust goal ──
   const handleAdjustGoal = useCallback(async (option: 'extend' | 'reduce' | 'collect') => {
@@ -843,6 +904,7 @@ export const ConsejeroView = ({
       ? `guardando ${fmt(ahorroDiario * 7)}/semana`
       : `guardando ${fmt(ahorroDiario)}/día`;
     await handleSend(`Acabo de crear mi meta "${nombre}" — quiero juntar ${fmt(monto)} en ${dias} días ${ritmoLabel}. ¿Qué me recomiendas para arrancar bien?`);
+    setInternalTab('meta');
   }, [userId, handleSend]);
 
   // ── Log savings (for a specific day, defaults to today) ──
@@ -878,6 +940,14 @@ export const ConsejeroView = ({
     );
     if (!updReg.find(r => r.fecha === fecha)) updReg.push({ fecha, estado: 'fallido' });
     await updateDoc(doc(db, 'users', userId, 'metas', activeMeta.id), { registros: updReg }).catch(console.error);
+  }, [activeMeta, userId]);
+
+  // ── Delete meta ──
+  const handleDeleteMeta = useCallback(async () => {
+    if (!activeMeta) return;
+    if (!window.confirm(`¿Eliminar la meta "${activeMeta.nombre}"? Esta acción no se puede deshacer.`)) return;
+    await deleteDoc(doc(db, 'users', userId, 'metas', activeMeta.id)).catch(console.error);
+    setInternalTab('chat');
   }, [activeMeta, userId]);
 
   // ── Test data ──
@@ -951,21 +1021,46 @@ export const ConsejeroView = ({
             {/* Messages */}
             <div className="flex-1 overflow-y-auto min-h-0">
               {messages.length === 0 && !isLoading && historyLoaded && (
-                <div className="flex flex-col items-center justify-center h-full py-8 px-4 text-center">
-                  <div className="w-14 h-14 rounded-full bg-gradient-to-br from-[#B8860B]/20 to-[#FFD700]/20 flex items-center justify-center mb-3">
-                    <Sparkles className="w-6 h-6 text-[#B8860B]" />
-                  </div>
-                  <p className="font-black text-base mb-1">Hola, {firstName}</p>
-                  <p className={cn('text-sm leading-relaxed max-w-[240px]', isDarkMode ? 'text-white/50' : 'text-black/50')}>
-                    Soy tu Consejero. Analizo tus datos reales y te ayudo con tus metas de ahorro.
-                  </p>
-                  {!activeMeta && (
-                    <button onClick={() => setShowNewGoalModal(true)}
-                      className="mt-4 flex items-center gap-2 px-4 py-2.5 rounded-full bg-gradient-to-r from-[#B8860B] to-[#FFD700] text-black font-black text-sm shadow-md active:scale-95 transition-transform">
-                      <Target className="w-4 h-4" /> Crear mi primera meta
+                hasAlerts && localTip && !tipDismissed ? (
+                  <div className="flex flex-col items-center justify-center h-full py-8 px-4">
+                    <ConsejeroAvatar />
+                    <p className="font-black text-base mt-3 mb-4">¿En qué te puedo ayudar?</p>
+                    <div className={cn(
+                      'w-full max-w-[290px] rounded-2xl p-4 border',
+                      isDarkMode ? 'bg-[#1A1A1A] border-white/8' : 'bg-white border-black/6 shadow-sm'
+                    )}>
+                      <p className={cn('text-xs leading-relaxed mb-3', isDarkMode ? 'text-white/70' : 'text-black/65')}>
+                        💡 {localTip.tip}
+                      </p>
+                      <button
+                        onClick={() => { setTipDismissed(true); handleSend(localTip.cta); }}
+                        className="w-full py-2.5 rounded-xl bg-gradient-to-r from-[#B8860B] to-[#FFD700] text-black font-black text-sm shadow-sm active:scale-95 transition-transform">
+                        {localTip.cta}
+                      </button>
+                    </div>
+                    <button
+                      onClick={() => setTipDismissed(true)}
+                      className={cn('mt-3 text-xs', isDarkMode ? 'text-white/30 hover:text-white/50' : 'text-black/30 hover:text-black/50')}>
+                      Ahora no
                     </button>
-                  )}
-                </div>
+                  </div>
+                ) : (
+                  <div className="flex flex-col items-center justify-center h-full py-8 px-4 text-center">
+                    <div className="w-14 h-14 rounded-full bg-gradient-to-br from-[#B8860B]/20 to-[#FFD700]/20 flex items-center justify-center mb-3">
+                      <Sparkles className="w-6 h-6 text-[#B8860B]" />
+                    </div>
+                    <p className="font-black text-base mb-1">Hola, {firstName}</p>
+                    <p className={cn('text-sm leading-relaxed max-w-[240px]', isDarkMode ? 'text-white/50' : 'text-black/50')}>
+                      Soy tu Consejero. Analizo tus datos reales y te ayudo con tus metas de ahorro.
+                    </p>
+                    {!activeMeta && (
+                      <button onClick={() => setShowNewGoalModal(true)}
+                        className="mt-4 flex items-center gap-2 px-4 py-2.5 rounded-full bg-gradient-to-r from-[#B8860B] to-[#FFD700] text-black font-black text-sm shadow-md active:scale-95 transition-transform">
+                        <Target className="w-4 h-4" /> Crear mi primera meta
+                      </button>
+                    )}
+                  </div>
+                )
               )}
               {messages.map(msg => (
                 <React.Fragment key={msg.id}>
@@ -1140,6 +1235,18 @@ export const ConsejeroView = ({
                     ))}
                   </div>
                 </div>
+
+                {/* ── Eliminar meta ── */}
+                <button
+                  onClick={handleDeleteMeta}
+                  className={cn(
+                    'w-full py-2.5 rounded-xl text-xs font-bold transition-colors',
+                    isDarkMode
+                      ? 'text-white/25 hover:text-red-400 hover:bg-red-500/10'
+                      : 'text-black/25 hover:text-red-500 hover:bg-red-50'
+                  )}>
+                  Eliminar esta meta
+                </button>
               </>
             )}
           </motion.div>
