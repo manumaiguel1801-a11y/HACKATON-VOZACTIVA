@@ -1,14 +1,16 @@
 import React, { useState } from 'react';
 import {
   ShieldCheck, Eye, FileText, CheckCircle2, ArrowRight,
-  Building2, Lock, Star, AlertCircle, ChevronLeft,
-  Fingerprint, BarChart3, ClipboardList, QrCode, IdCard,
+  Building2, Lock, Star, AlertCircle,
+  Fingerprint, BarChart3, ClipboardList, QrCode,
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { AvalDashboard } from './AvalDashboard';
+import { IdentityVerification } from './IdentityVerification';
 
 interface Props {
   isDarkMode: boolean;
+  userId: string;
   prefillCedula?: string;
   userName?: string;
 }
@@ -51,32 +53,22 @@ const REQUIREMENTS = [
   'Foto de perfil y datos básicos del negocio',
 ];
 
-export const AvalView = ({ isDarkMode, prefillCedula = '', userName = '' }: Props) => {
+export const AvalView = ({ isDarkMode, userId, prefillCedula = '', userName = '' }: Props) => {
   const [step, setStep] = useState<Step>('info');
-  const [cedula, setCedula] = useState(prefillCedula);
-  const [cedulaError, setCedulaError] = useState('');
+  const [verifiedName, setVerifiedName] = useState(userName);
+  const [verifiedCedula, setVerifiedCedula] = useState(prefillCedula);
 
   const card = cn('rounded-2xl p-6', isDarkMode ? 'bg-[#1A1A1A]' : 'bg-white');
   const muted = isDarkMode ? 'text-white/40' : 'text-black/40';
   const text  = isDarkMode ? 'text-[#FDFBF0]' : 'text-[#2e2f2d]';
-
-  const handleIdentitySubmit = () => {
-    const clean = cedula.replace(/\D/g, '');
-    if (clean.length < 6) {
-      setCedulaError('Ingresa un número de cédula válido.');
-      return;
-    }
-    setCedulaError('');
-    setStep('dashboard');
-  };
 
   // ── Dashboard ────────────────────────────────────────────────────────────
   if (step === 'dashboard') {
     return (
       <AvalDashboard
         isDarkMode={isDarkMode}
-        cedula={cedula}
-        userName={userName}
+        cedula={verifiedCedula}
+        userName={verifiedName}
         onBack={() => setStep('info')}
       />
     );
@@ -85,76 +77,16 @@ export const AvalView = ({ isDarkMode, prefillCedula = '', userName = '' }: Prop
   // ── Identity step ─────────────────────────────────────────────────────────
   if (step === 'identity') {
     return (
-      <div className="space-y-4 animate-in fade-in slide-in-from-bottom-4 duration-400 max-w-sm mx-auto">
-        <button
-          onClick={() => setStep('info')}
-          className={cn('flex items-center gap-1.5 text-xs font-bold transition-colors', isDarkMode ? 'text-white/40 hover:text-white/70' : 'text-black/40 hover:text-black/70')}
-        >
-          <ChevronLeft className="w-4 h-4" />
-          Volver
-        </button>
-
-        <div className={cn('rounded-2xl p-6 space-y-5', isDarkMode ? 'bg-[#1A1A1A]' : 'bg-white')}>
-          {/* Icon */}
-          <div className="flex flex-col items-center text-center gap-3 pb-2">
-            <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-[#B8860B] to-[#FFD700] flex items-center justify-center text-black shadow-lg">
-              <IdCard className="w-7 h-7" />
-            </div>
-            <div>
-              <h2 className={cn("font-black text-xl font-['Plus_Jakarta_Sans']", text)}>Confirma tu identidad</h2>
-              <p className={cn('text-sm mt-1', isDarkMode ? 'text-white/50' : 'text-[#5b5c5a]')}>
-                Ingresa tu número de cédula para continuar
-              </p>
-            </div>
-          </div>
-
-          {/* Input */}
-          <div className="space-y-1.5">
-            <label className={cn('text-xs font-bold uppercase tracking-widest', muted)}>
-              Número de cédula
-            </label>
-            <input
-              type="tel"
-              inputMode="numeric"
-              value={cedula}
-              onChange={e => { setCedula(e.target.value.replace(/\D/g, '')); setCedulaError(''); }}
-              onKeyDown={e => e.key === 'Enter' && handleIdentitySubmit()}
-              placeholder="Ej: 1020304050"
-              className={cn(
-                'w-full h-14 px-4 rounded-xl border-2 text-base font-bold transition-colors outline-none',
-                cedulaError
-                  ? 'border-red-400 bg-red-50 text-red-700'
-                  : isDarkMode
-                    ? 'bg-[#0D0D0D] border-white/10 text-[#FDFBF0] placeholder:text-white/20 focus:border-[#B8860B]'
-                    : 'bg-[#FDFBF0] border-black/10 text-[#2e2f2d] placeholder:text-black/25 focus:border-[#B8860B]'
-              )}
-            />
-            {cedulaError && (
-              <p className="text-xs font-medium text-red-500 flex items-center gap-1">
-                <AlertCircle className="w-3.5 h-3.5" />
-                {cedulaError}
-              </p>
-            )}
-          </div>
-
-          {/* Submit */}
-          <button
-            onClick={handleIdentitySubmit}
-            className="w-full h-14 flex items-center justify-between px-5 rounded-xl font-black text-sm bg-gradient-to-r from-[#B8860B] to-[#DAA520] text-white shadow-md active:scale-[0.98] transition-all"
-          >
-            <span>Ingresar al panel</span>
-            <ArrowRight className="w-5 h-5" />
-          </button>
-
-          {/* Security note */}
-          <div className="flex items-center justify-center gap-1.5">
-            <Lock className={cn('w-3.5 h-3.5', muted)} />
-            <p className={cn('text-[11px] font-medium', muted)}>
-              Tu cédula no se comparte con terceros
-            </p>
-          </div>
-        </div>
-      </div>
+      <IdentityVerification
+        isDarkMode={isDarkMode}
+        userId={userId}
+        prefillCedula={prefillCedula}
+        onVerified={(name) => {
+          setVerifiedName(name || userName);
+          setStep('dashboard');
+        }}
+        onBack={() => setStep('info')}
+      />
     );
   }
 
