@@ -15,6 +15,7 @@ import {
   LogOut,
   X,
   Sparkles,
+  FileText,
 } from 'lucide-react';
 import { signOut } from 'firebase/auth';
 import { auth } from '../firebase';
@@ -73,6 +74,7 @@ export const Layout = ({
     { tab: 'inicio',     icon: <Home />,      label: 'Inicio' },
     { tab: 'finanzas',   icon: <TrendingUp />, label: 'Finanzas' },
     { tab: 'consejero',  icon: <Sparkles />,   label: 'Consejero' },
+    { tab: 'reporte',    icon: <FileText />,   label: 'Reporte' },
     { tab: 'camara',     icon: <Users />,      label: 'Deudas' },
     { tab: 'inventario', icon: <Package />,    label: 'Inventario' },
   ];
@@ -150,30 +152,8 @@ export const Layout = ({
           <span className="font-['Plus_Jakarta_Sans'] font-black text-lg text-[#B8860B]">Voz-Activa</span>
         </div>
 
-        {/* User info */}
-        <div className={cn(
-          'flex items-center gap-3 px-5 py-4 border-b',
-          isDarkMode ? 'border-white/5' : 'border-black/5'
-        )}>
-          <div className="w-9 h-9 rounded-full overflow-hidden border-2 border-[#D4AF37] flex-shrink-0">
-            <Avatar
-              photoURL={profilePhotoURL}
-              firstName={profileFirstName}
-              lastName={profileLastName}
-              size="sm"
-              isDarkMode={isDarkMode}
-            />
-          </div>
-          <div className="min-w-0">
-            <p className="font-bold text-sm truncate text-[#B8860B]">{cleanName}</p>
-            <p className={cn('text-[10px] truncate', isDarkMode ? 'text-white/40' : 'text-black/40')}>
-              Vendedor activo
-            </p>
-          </div>
-        </div>
-
         {/* Nav items */}
-        <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
+        <nav className="flex-1 px-3 py-4 space-y-1">
           {navItems.map(({ tab, icon, label }) => (
             <React.Fragment key={tab}>
               <SidebarButton
@@ -201,41 +181,63 @@ export const Layout = ({
           />
         </nav>
 
-        {/* Bottom actions */}
-        <div className={cn(
-          'px-3 py-4 border-t space-y-1',
-          isDarkMode ? 'border-white/5' : 'border-black/5'
-        )}>
-          <button
-            onClick={() => setShowSuggestions(true)}
-            className={cn(
-              'w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-colors',
-              isDarkMode ? 'text-white/50 hover:bg-white/5 hover:text-white/80' : 'text-black/50 hover:bg-black/5 hover:text-black/80'
-            )}
-          >
-            <MessageSquare className="w-4 h-4" />
-            Sugerencias
-          </button>
-          <button
-            onClick={() => setShowManual(true)}
-            className={cn(
-              'w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-colors',
-              isDarkMode ? 'text-white/50 hover:bg-white/5 hover:text-white/80' : 'text-black/50 hover:bg-black/5 hover:text-black/80'
-            )}
-          >
-            <HelpCircle className="w-4 h-4" />
-            Ayuda
-          </button>
-          <button
-            onClick={toggleDarkMode}
-            className={cn(
-              'w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-colors',
-              isDarkMode ? 'text-white/50 hover:bg-white/5 hover:text-white/80' : 'text-black/50 hover:bg-black/5 hover:text-black/80'
-            )}
-          >
-            {isDarkMode ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
-            {isDarkMode ? 'Modo claro' : 'Modo oscuro'}
-          </button>
+        {/* Bottom: utility icons + profile + logout */}
+        <div className={cn('border-t', isDarkMode ? 'border-white/5' : 'border-black/5')}>
+          {/* Compact utility row */}
+          <div className={cn('flex items-center gap-1 px-3 py-2 border-b', isDarkMode ? 'border-white/5' : 'border-black/5')}>
+            <button
+              onClick={() => setShowSuggestions(true)}
+              title="Sugerencias"
+              className={cn('flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-medium transition-colors', isDarkMode ? 'text-white/40 hover:bg-white/5 hover:text-white/70' : 'text-black/40 hover:bg-black/5 hover:text-black/70')}
+            >
+              <MessageSquare className="w-3.5 h-3.5" />
+              Sugerencias
+            </button>
+            <button
+              onClick={() => setShowManual(true)}
+              title="Ayuda"
+              className={cn('flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-medium transition-colors', isDarkMode ? 'text-white/40 hover:bg-white/5 hover:text-white/70' : 'text-black/40 hover:bg-black/5 hover:text-black/70')}
+            >
+              <HelpCircle className="w-3.5 h-3.5" />
+              Ayuda
+            </button>
+            <button
+              onClick={toggleDarkMode}
+              title={isDarkMode ? 'Modo claro' : 'Modo oscuro'}
+              className={cn('w-8 h-8 flex items-center justify-center rounded-xl transition-colors', isDarkMode ? 'text-white/40 hover:bg-white/5 hover:text-white/70' : 'text-black/40 hover:bg-black/5 hover:text-black/70')}
+            >
+              {isDarkMode ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+            </button>
+          </div>
+
+          {/* Profile + logout */}
+          <div className="flex items-center gap-3 px-4 py-4">
+            <button
+              onClick={() => setActiveTab('perfil')}
+              className="flex items-center gap-3 flex-1 min-w-0 group"
+            >
+              <div className="w-9 h-9 rounded-full overflow-hidden border-2 border-[#D4AF37] flex-shrink-0">
+                <Avatar
+                  photoURL={profilePhotoURL}
+                  firstName={profileFirstName}
+                  lastName={profileLastName}
+                  size="sm"
+                  isDarkMode={isDarkMode}
+                />
+              </div>
+              <div className="min-w-0 text-left">
+                <p className={cn('font-bold text-sm truncate transition-colors', isDarkMode ? 'text-white/80 group-hover:text-[#FFD700]' : 'text-[#2e2f2d] group-hover:text-[#B8860B]')}>{cleanName}</p>
+                <p className={cn('text-[10px] truncate', isDarkMode ? 'text-white/30' : 'text-black/30')}>Vendedor activo</p>
+              </div>
+            </button>
+            <button
+              onClick={() => setShowLogoutConfirm(true)}
+              title="Cerrar sesión"
+              className={cn('w-9 h-9 flex items-center justify-center rounded-xl flex-shrink-0 transition-colors', isDarkMode ? 'text-white/30 hover:bg-red-500/15 hover:text-red-400' : 'text-black/30 hover:bg-red-50 hover:text-red-500')}
+            >
+              <LogOut className="w-4 h-4" />
+            </button>
+          </div>
         </div>
       </aside>
 
@@ -274,12 +276,6 @@ export const Layout = ({
         <div className="flex items-center gap-1">
           {/* Desktop-only icons */}
           <div className="hidden md:flex items-center gap-3 mr-2">
-            <button onClick={() => setShowSuggestions(true)} className="w-5 h-5 text-gray-400 hover:text-gray-600 cursor-pointer transition-colors">
-              <MessageCircle className="w-5 h-5" />
-            </button>
-            <button onClick={() => setShowManual(true)} className="w-5 h-5 text-gray-400 hover:text-gray-600 cursor-pointer transition-colors">
-              <HelpCircle className="w-5 h-5" />
-            </button>
             <div className="relative">
               <button
                 onClick={() => setShowNotifications(v => !v)}
@@ -335,9 +331,6 @@ export const Layout = ({
                 </div>
               )}
             </div>
-            <button onClick={() => setShowLogoutConfirm(true)} className="text-gray-400 hover:text-gray-600 cursor-pointer transition-colors" title="Cerrar sesión">
-              <LogOut className="w-5 h-5" />
-            </button>
           </div>
           <button
             onClick={() => setShowSuggestions(true)}

@@ -1,6 +1,6 @@
 import React from 'react';
 
-export type Tab = 'inicio' | 'finanzas' | 'camara' | 'inventario' | 'pasaporte' | 'perfil' | 'consejero' | 'credito';
+export type Tab = 'inicio' | 'finanzas' | 'reporte' | 'camara' | 'inventario' | 'pasaporte' | 'perfil' | 'consejero' | 'credito';
 
 export interface Transaction {
   id: string;
