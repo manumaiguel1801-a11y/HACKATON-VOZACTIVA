@@ -46,4 +46,5 @@ export const MSG_HELP = `📋 *¿Qué puedo registrar?*
 
 Registra exactamente como hablas — sin formatos especiales.
 
-_CANCELAR — cancela cualquier operación en curso_`;
+_CANCELAR — cancela cualquier operación en curso_
+_/LOGS — muestra los últimos 15 eventos (debug)_`;
