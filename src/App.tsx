@@ -195,6 +195,7 @@ export default function App() {
               isDarkMode={isDarkMode}
               userId={user.uid}
               prefillCedula={profile?.idNumber}
+              profileBirthDate={profile?.birthDate}
               userName={profile?.firstName}
             />
           </motion.div>

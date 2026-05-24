@@ -24,10 +24,25 @@ function normalizeNum(s: string): string {
   return s.replace(/[\s.\-,]/g, '');
 }
 
-function normalizeDateStr(s: string): string {
-  // Accepts YYYY-MM-DD, DD/MM/YYYY, DD-MM-YYYY → returns DDMMYYYY digits only
-  if (!s) return '';
-  return s.replace(/[\s.\-\/]/g, '');
+// Parse into {day,month,year} from YYYY-MM-DD or DD/MM/YYYY
+function parseDateParts(s: string): { day: string; month: string; year: string } | null {
+  if (!s) return null;
+  const iso = s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (iso) return { year: iso[1], month: iso[2], day: iso[3] };
+  const dmy = s.match(/^(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{2,4})$/);
+  if (dmy) return {
+    day: dmy[1].padStart(2, '0'),
+    month: dmy[2].padStart(2, '0'),
+    year: dmy[3].length === 2 ? '19' + dmy[3] : dmy[3],
+  };
+  return null;
+}
+
+function datesMatch(a: string, b: string): boolean {
+  const pa = parseDateParts(a);
+  const pb = parseDateParts(b);
+  if (!pa || !pb) return false;
+  return pa.day === pb.day && pa.month === pb.month && pa.year === pb.year;
 }
 
 async function fileToBase64(file: File): Promise<string> {
@@ -108,10 +123,8 @@ Si la imagen no es una cédula colombiana válida o no se pueden leer los datos,
     const enteredNum    = normalizeNum(enteredCedula);
     const cedulaMatch   = extractedNum === enteredNum;
 
-    const extractedDate = normalizeDateStr(parsed.fechaNacimiento ?? '');
-    const enteredDate   = normalizeDateStr(enteredBirthDate);
-    // If user didn't enter a date we skip that check
-    const dateMatch     = !enteredDate || extractedDate === enteredDate;
+    // If no profile birth date provided, skip the check
+    const dateMatch = !enteredBirthDate || datesMatch(parsed.fechaNacimiento ?? '', enteredBirthDate);
 
     if (!cedulaMatch) {
       return {

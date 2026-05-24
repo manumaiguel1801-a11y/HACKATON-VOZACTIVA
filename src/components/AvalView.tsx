@@ -12,6 +12,7 @@ interface Props {
   isDarkMode: boolean;
   userId: string;
   prefillCedula?: string;
+  profileBirthDate?: string;
   userName?: string;
 }
 
@@ -53,7 +54,7 @@ const REQUIREMENTS = [
   'Foto de perfil y datos básicos del negocio',
 ];
 
-export const AvalView = ({ isDarkMode, userId, prefillCedula = '', userName = '' }: Props) => {
+export const AvalView = ({ isDarkMode, userId, prefillCedula = '', profileBirthDate = '', userName = '' }: Props) => {
   const [step, setStep] = useState<Step>('info');
   const [verifiedName, setVerifiedName] = useState(userName);
   const [verifiedCedula, setVerifiedCedula] = useState(prefillCedula);
@@ -81,6 +82,7 @@ export const AvalView = ({ isDarkMode, userId, prefillCedula = '', userName = ''
         isDarkMode={isDarkMode}
         userId={userId}
         prefillCedula={prefillCedula}
+        profileBirthDate={profileBirthDate}
         onVerified={(name) => {
           setVerifiedName(name || userName);
           setStep('dashboard');

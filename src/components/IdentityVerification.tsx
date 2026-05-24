@@ -2,7 +2,6 @@ import React, { useState, useRef } from 'react';
 import {
   IdCard, Camera, Upload, CheckCircle2, XCircle,
   Loader2, ChevronLeft, ShieldCheck, AlertCircle, RefreshCw,
-  Calendar,
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { analyzeCedulaImage, saveVerification, VerificationResult } from '../services/identityService';
@@ -13,16 +12,15 @@ interface Props {
   isDarkMode: boolean;
   userId: string;
   prefillCedula?: string;
+  profileBirthDate?: string;
   onVerified: (name: string) => void;
   onBack: () => void;
 }
 
-export const IdentityVerification = ({ isDarkMode, userId, prefillCedula = '', onVerified, onBack }: Props) => {
+export const IdentityVerification = ({ isDarkMode, userId, prefillCedula = '', profileBirthDate = '', onVerified, onBack }: Props) => {
   const [step, setStep]               = useState<Step>('cedula');
   const [cedula, setCedula]           = useState(prefillCedula);
-  const [birthDate, setBirthDate]     = useState('');
   const [cedulaError, setCedulaError] = useState('');
-  const [birthError, setBirthError]   = useState('');
   const [photoFile, setPhotoFile]     = useState<File | null>(null);
   const [photoPreview, setPhotoPreview] = useState('');
   const [result, setResult]           = useState<VerificationResult | null>(null);
@@ -43,21 +41,13 @@ export const IdentityVerification = ({ isDarkMode, userId, prefillCedula = '', o
 
   // ── Step 1 ───────────────────────────────────────────────────────────────
   const handleCedulaNext = () => {
-    let ok = true;
     const cleanNum = cedula.replace(/\D/g, '');
     if (cleanNum.length < 6) {
       setCedulaError('Ingresa un número de cédula válido.');
-      ok = false;
-    } else {
-      setCedulaError('');
+      return;
     }
-    if (!birthDate) {
-      setBirthError('Ingresa tu fecha de nacimiento.');
-      ok = false;
-    } else {
-      setBirthError('');
-    }
-    if (ok) setStep('foto');
+    setCedulaError('');
+    setStep('foto');
   };
 
   // ── Step 2 ───────────────────────────────────────────────────────────────
@@ -70,7 +60,7 @@ export const IdentityVerification = ({ isDarkMode, userId, prefillCedula = '', o
     if (!photoFile) return;
     setStep('analizando');
 
-    const res = await analyzeCedulaImage(photoFile, cedula, birthDate);
+    const res = await analyzeCedulaImage(photoFile, cedula, profileBirthDate);
     setResult(res);
 
     if (res.ok) {
@@ -118,7 +108,7 @@ export const IdentityVerification = ({ isDarkMode, userId, prefillCedula = '', o
             <div>
               <h2 className={cn("font-black text-xl font-['Plus_Jakarta_Sans']", text)}>Paso 1 de 2</h2>
               <p className={cn('text-sm mt-1', isDarkMode ? 'text-white/50' : 'text-[#5b5c5a]')}>
-                Ingresa tus datos para verificar
+                Ingresa tu número de cédula
               </p>
             </div>
           </div>
@@ -138,24 +128,6 @@ export const IdentityVerification = ({ isDarkMode, userId, prefillCedula = '', o
             {cedulaError && (
               <p className="text-xs font-medium text-red-500 flex items-center gap-1">
                 <AlertCircle className="w-3.5 h-3.5" />{cedulaError}
-              </p>
-            )}
-          </div>
-
-          {/* Fecha de nacimiento */}
-          <div className="space-y-1.5">
-            <label className={cn('text-xs font-bold uppercase tracking-widest', muted)}>
-              <span className="flex items-center gap-1.5"><Calendar className="w-3.5 h-3.5" />Fecha de nacimiento</span>
-            </label>
-            <input
-              type="date"
-              value={birthDate}
-              onChange={e => { setBirthDate(e.target.value); setBirthError(''); }}
-              className={cn(inputBase(!!birthError), 'appearance-none')}
-            />
-            {birthError && (
-              <p className="text-xs font-medium text-red-500 flex items-center gap-1">
-                <AlertCircle className="w-3.5 h-3.5" />{birthError}
               </p>
             )}
           </div>
