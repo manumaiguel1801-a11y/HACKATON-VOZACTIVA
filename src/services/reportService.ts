@@ -1,51 +1,33 @@
-import { GoogleGenAI } from '@google/genai';
+import { GoogleGenAI, Type } from '@google/genai';
 import { Sale, Expense } from '../types';
 
-export type ReportPeriod = '1d' | '7d' | '14d' | '21d' | 'mes';
+export type ReportPeriod = '7d' | '15d' | 'mes' | 'all';
 
-export const PERIOD_CONFIG: Record<ReportPeriod, { label: string; sub: string; days: number | null }> = {
-  '1d': { label: 'Hoy', sub: 'Solo hoy', days: 1 },
-  '7d': { label: 'Esta semana', sub: 'Últimos 7 días', days: 7 },
-  '14d': { label: '2 semanas', sub: 'Últimos 14 días', days: 14 },
-  '21d': { label: '3 semanas', sub: 'Últimos 21 días', days: 21 },
-  'mes': { label: 'Este mes', sub: 'Mes en curso', days: null },
+export const PERIOD_CONFIG: Record<ReportPeriod, { label: string; sub: string; days: number | null; allTime?: boolean }> = {
+  '7d':  { label: '7 días',             sub: 'Últimos 7 días',   days: 7 },
+  '15d': { label: '15 días',            sub: 'Últimos 15 días',  days: 15 },
+  'mes': { label: '1 mes',              sub: 'Mes en curso',     days: null },
+  'all': { label: 'Todo',               sub: 'Desde el inicio',  days: null, allTime: true },
 };
 
-export interface ReportSection {
-  title: string;
-  emoji: string;
-  content: string;
-}
+export interface ChartPoint  { name: string; income: number; exp: number }
+export interface PieSlice    { name: string; value: number;  color: string }
+export interface AIInsight   { titulo: string; texto: string }
 
 export interface ParsedReport {
-  sections: ReportSection[];
-  raw: string;
+  periodoLabel:   string;
+  metrics:        { ingresos: number; gastos: number; utilidad: number; transacciones: number };
+  chartData:      ChartPoint[];
+  pieData:        PieSlice[];
+  bestDay:        { name: string; amount: number } | null;
+  descripcion:    string;
+  insights:       AIInsight[];
+  recomendaciones: AIInsight[];
+  conclusion:     string;
 }
 
-const SECTION_MAP: { key: string; emoji: string; title: string }[] = [
-  { key: 'DESCRIPCIÓN DEL NEGOCIO', emoji: '🧾', title: 'Descripción del negocio' },
-  { key: 'RESUMEN FINANCIERO', emoji: '💰', title: 'Resumen financiero' },
-  { key: 'ANÁLISIS INTELIGENTE', emoji: '📊', title: 'Análisis inteligente' },
-  { key: 'RECOMENDACIONES PERSONALIZADAS', emoji: '🎯', title: 'Recomendaciones' },
-  { key: 'CONCLUSIÓN', emoji: '📌', title: 'Conclusión' },
-];
-
-export function parseReport(raw: string): ParsedReport {
-  const sections: ReportSection[] = [];
-  const parts = raw.split(/###\s*/);
-  for (const part of parts) {
-    const trimmed = part.trim();
-    if (!trimmed) continue;
-    const lineBreak = trimmed.indexOf('\n');
-    const heading = lineBreak === -1 ? trimmed : trimmed.slice(0, lineBreak).trim();
-    const content = lineBreak === -1 ? '' : trimmed.slice(lineBreak).trim();
-    const match = SECTION_MAP.find(s => heading.toUpperCase().includes(s.key));
-    if (match) {
-      sections.push({ title: match.title, emoji: match.emoji, content });
-    }
-  }
-  return { sections, raw };
-}
+const PIE_COLORS = ['#B8860B', '#3B82F6', '#8B5CF6', '#EF4444', '#22C55E', '#F59E0B'];
+const DAY_NAMES  = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
 
 function getSaleDate(s: Sale): Date {
   return s.createdAt?.toDate ? s.createdAt.toDate() : new Date();
@@ -54,124 +36,142 @@ function getExpenseDate(e: Expense): Date {
   return e.createdAt?.toDate ? e.createdAt.toDate() : new Date();
 }
 
-function buildPrompt(
-  sales: Sale[],
-  expenses: Expense[],
-  period: ReportPeriod,
-  userName?: string,
-): string {
+function getDateRange(period: ReportPeriod): { start: Date; label: string } {
   const now = new Date();
-  let start: Date;
-  let periodoLabel: string;
-
-  const cfg = PERIOD_CONFIG[period];
-  if (cfg.days !== null) {
-    start = new Date(now.getTime() - cfg.days * 24 * 3600 * 1000);
-    periodoLabel = `${cfg.label} (${start.toLocaleDateString('es-CO', { day: '2-digit', month: 'short' })} – ${now.toLocaleDateString('es-CO', { day: '2-digit', month: 'short', year: 'numeric' })})`;
-  } else {
-    start = new Date(now.getFullYear(), now.getMonth(), 1);
-    periodoLabel = now.toLocaleDateString('es-CO', { month: 'long', year: 'numeric' });
-    periodoLabel = periodoLabel.charAt(0).toUpperCase() + periodoLabel.slice(1);
+  if (period === 'mes') {
+    const start = new Date(now.getFullYear(), now.getMonth(), 1);
+    const label = now.toLocaleDateString('es-CO', { month: 'long', year: 'numeric' });
+    return { start, label: label.charAt(0).toUpperCase() + label.slice(1) };
   }
-
-  const filteredSales = sales.filter(s => getSaleDate(s) >= start);
-  const filteredExpenses = expenses.filter(e => getExpenseDate(e) >= start);
-
-  const ingresos = filteredSales.reduce((sum, s) => sum + s.total, 0);
-  const gastos = filteredExpenses.reduce((sum, e) => sum + e.amount, 0);
-  const utilidad = ingresos - gastos;
-  const transacciones = filteredSales.length + filteredExpenses.length;
-
-  // Top products
-  const productMap = new Map<string, { qty: number; total: number }>();
-  filteredSales.forEach(s => {
-    if (s.items?.length) {
-      s.items.forEach(item => {
-        const p = productMap.get(item.product) ?? { qty: 0, total: 0 };
-        productMap.set(item.product, { qty: p.qty + item.quantity, total: p.total + item.subtotal });
-      });
-    } else {
-      const name = s.concept ?? s.product ?? 'Producto';
-      const p = productMap.get(name) ?? { qty: 0, total: 0 };
-      productMap.set(name, { qty: p.qty + 1, total: p.total + s.total });
-    }
-  });
-  const productosText = [...productMap.entries()]
-    .sort((a, b) => b[1].total - a[1].total)
-    .slice(0, 5)
-    .map(([name, { qty, total }]) => `- ${name}: ${qty} unidades, $${total.toLocaleString('es-CO')}`)
-    .join('\n') || 'Sin ventas registradas en el periodo.';
-
-  // Expense breakdown
-  const expenseMap = new Map<string, number>();
-  filteredExpenses.forEach(e => {
-    expenseMap.set(e.concept, (expenseMap.get(e.concept) ?? 0) + e.amount);
-  });
-  const gastosDetalleText = [...expenseMap.entries()]
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 8)
-    .map(([concept, amount]) => `- ${concept}: $${amount.toLocaleString('es-CO')}`)
-    .join('\n') || 'Sin gastos registrados en el periodo.';
-
-  const fmt = (v: number) => `$${v.toLocaleString('es-CO')}`;
-  const negocio = userName ? `Negocio de ${userName}` : 'Mi Negocio';
-
-  return `Eres un analista financiero experto en pequeños negocios informales en Latinoamérica.
-
-Tu tarea es generar un REPORTE FINANCIERO PROFESIONAL en español, claro, directo y útil, basado en los datos proporcionados.
-
-El reporte será usado para generar un PDF formal, por lo tanto:
-- Usa un tono profesional pero fácil de entender
-- No uses lenguaje técnico complicado
-- Sé concreto, evita párrafos largos
-- Enfócate en ayudar al usuario a tomar decisiones reales
-
-## DATOS DEL NEGOCIO
-
-Nombre del negocio: ${negocio}
-Periodo analizado: ${periodoLabel}
-
-Ingresos totales: ${fmt(ingresos)}
-Gastos totales: ${fmt(gastos)}
-Utilidad neta: ${fmt(utilidad)}
-Número de transacciones: ${transacciones}
-
-Detalle de productos más vendidos:
-${productosText}
-
-Detalle de gastos (categorías):
-${gastosDetalleText}
-
-## INSTRUCCIONES
-
-Genera el reporte con la siguiente estructura EXACTA (usa exactamente estos encabezados ### con sus emojis):
-
-### 🧾 DESCRIPCIÓN DEL NEGOCIO
-Escribe un breve párrafo (2-3 líneas) describiendo el tipo de negocio basado en los datos.
-
-### 💰 RESUMEN FINANCIERO
-Haz un resumen claro de si el negocio está ganando o perdiendo dinero y qué tan grave o positivo es el resultado. Máximo 2-3 líneas.
-
-### 📊 ANÁLISIS INTELIGENTE
-Escribe 3 a 4 insights CLAROS y DIRECTOS como lista con guión (-). Identifica gastos, producto estrella, patrones y posibles problemas.
-
-### 🎯 RECOMENDACIONES PERSONALIZADAS
-Escribe 3 recomendaciones PRÁCTICAS y ACCIONABLES como lista con guión (-). Basadas en los datos, concretas, dicen exactamente qué hacer.
-
-### 📌 CONCLUSIÓN
-Una sola frase clara y contundente sobre el estado del negocio.
-
-## REGLAS
-- No inventes datos
-- No repitas información innecesaria
-- No escribas párrafos largos
-- Sé directo, útil y accionable`;
+  if (period === 'all') {
+    const start = new Date(2020, 0, 1);
+    return { start, label: 'Desde el inicio' };
+  }
+  const days = PERIOD_CONFIG[period].days!;
+  const start = new Date(now.getTime() - days * 86_400_000);
+  return {
+    start,
+    label: `Últimos ${days} días (${start.toLocaleDateString('es-CO', { day: '2-digit', month: 'short' })} – ${now.toLocaleDateString('es-CO', { day: '2-digit', month: 'short', year: 'numeric' })})`,
+  };
 }
 
-const REPORT_MODELS = [
-  'gemini-2.5-flash',
-  'gemini-2.0-flash',
-];
+function computeChartData(sales: Sale[], expenses: Expense[], start: Date, period: ReportPeriod): ChartPoint[] {
+  const now = new Date();
+
+  if (period === 'all') {
+    // Group by week, last 10 weeks
+    const points: ChartPoint[] = [];
+    for (let i = 9; i >= 0; i--) {
+      const wEnd = new Date(now.getTime() - i * 7 * 86_400_000);
+      const wStart = new Date(wEnd.getTime() - 7 * 86_400_000);
+      const income = sales.filter(s => { const d = getSaleDate(s); return d >= wStart && d < wEnd; }).reduce((s, x) => s + x.total, 0);
+      const exp    = expenses.filter(e => { const d = getExpenseDate(e); return d >= wStart && d < wEnd; }).reduce((s, x) => s + x.amount, 0);
+      points.push({ name: wEnd.toLocaleDateString('es-CO', { day: '2-digit', month: 'short' }), income, exp });
+    }
+    return points;
+  }
+
+  const days: ChartPoint[] = [];
+  let cur = new Date(start);
+  cur.setHours(0, 0, 0, 0);
+  while (cur <= now) {
+    const dayEnd = new Date(cur.getTime() + 86_400_000);
+    const income = sales.filter(s => { const d = getSaleDate(s); return d >= cur && d < dayEnd; }).reduce((s, x) => s + x.total, 0);
+    const exp    = expenses.filter(e => { const d = getExpenseDate(e); return d >= cur && d < dayEnd; }).reduce((s, x) => s + x.amount, 0);
+    days.push({ name: DAY_NAMES[cur.getDay()], income, exp });
+    cur = new Date(cur.getTime() + 86_400_000);
+  }
+  return days;
+}
+
+function computePieData(expenses: Expense[], start: Date): PieSlice[] {
+  const map = new Map<string, number>();
+  expenses.filter(e => getExpenseDate(e) >= start).forEach(e => {
+    map.set(e.concept, (map.get(e.concept) ?? 0) + e.amount);
+  });
+  const total = [...map.values()].reduce((a, b) => a + b, 0);
+  if (total === 0) return [];
+  const sorted = [...map.entries()].sort((a, b) => b[1] - a[1]);
+  const top = sorted.slice(0, 5);
+  const otrosTotal = sorted.slice(5).reduce((s, [, v]) => s + v, 0);
+  const slices: PieSlice[] = top.map(([name, value], i) => ({
+    name, color: PIE_COLORS[i], value: Math.round((value / total) * 100),
+  }));
+  if (otrosTotal > 0) slices.push({ name: 'Otros', color: PIE_COLORS[5], value: Math.round((otrosTotal / total) * 100) });
+  return slices;
+}
+
+function computeBestDay(sales: Sale[], start: Date): { name: string; amount: number } | null {
+  const map = new Map<string, number>();
+  sales.filter(s => getSaleDate(s) >= start).forEach(s => {
+    const d = getSaleDate(s);
+    const key = DAY_NAMES[d.getDay()];
+    map.set(key, (map.get(key) ?? 0) + s.total);
+  });
+  if (map.size === 0) return null;
+  const [name, amount] = [...map.entries()].sort((a, b) => b[1] - a[1])[0];
+  return { name, amount };
+}
+
+const AI_CONFIG = {
+  responseMimeType: 'application/json',
+  responseSchema: {
+    type: Type.OBJECT,
+    properties: {
+      descripcion: { type: Type.STRING },
+      insights: {
+        type: Type.ARRAY,
+        items: {
+          type: Type.OBJECT,
+          properties: { titulo: { type: Type.STRING }, texto: { type: Type.STRING } },
+          required: ['titulo', 'texto'],
+        },
+      },
+      recomendaciones: {
+        type: Type.ARRAY,
+        items: {
+          type: Type.OBJECT,
+          properties: { titulo: { type: Type.STRING }, texto: { type: Type.STRING } },
+          required: ['titulo', 'texto'],
+        },
+      },
+      conclusion: { type: Type.STRING },
+    },
+    required: ['descripcion', 'insights', 'recomendaciones', 'conclusion'],
+  },
+};
+
+function buildPrompt(
+  metrics: ParsedReport['metrics'],
+  pieData: PieSlice[],
+  bestDay: { name: string; amount: number } | null,
+  periodoLabel: string,
+  userName?: string,
+): string {
+  const fmt = (v: number) => `$${v.toLocaleString('es-CO')}`;
+  const gastosPie = pieData.map(p => `${p.name}: ${p.value}%`).join(', ') || 'Sin datos';
+  return `Eres un analista financiero experto en pequeños negocios informales latinoamericanos.
+
+Analiza estos datos y genera un reporte financiero en español, claro y útil.
+
+DATOS:
+- Negocio: ${userName ? `Negocio de ${userName}` : 'Mi Negocio'}
+- Período: ${periodoLabel}
+- Ingresos: ${fmt(metrics.ingresos)}
+- Gastos: ${fmt(metrics.gastos)}
+- Utilidad: ${fmt(metrics.utilidad)}
+- Transacciones: ${metrics.transacciones}
+- Distribución de gastos: ${gastosPie}
+- Mejor día de ventas: ${bestDay ? `${bestDay.name} con ${fmt(bestDay.amount)}` : 'Sin datos'}
+
+Devuelve JSON con:
+- "descripcion": 2-3 líneas describiendo el tipo de negocio y comportamiento
+- "insights": array de exactamente 4 objetos {titulo, texto} con análisis clave (positivos y negativos)
+- "recomendaciones": array de exactamente 4 objetos {titulo, texto} con acciones concretas basadas en los datos
+- "conclusion": una sola frase contundente sobre el estado del negocio
+
+Reglas: sé concreto, usa los números reales, no inventes datos, no uses lenguaje técnico.`;
+}
 
 export async function generateFinancialReport(
   sales: Sale[],
@@ -182,17 +182,41 @@ export async function generateFinancialReport(
   const key = process.env.GEMINI_API_KEY;
   if (!key) throw new Error('No hay GEMINI_API_KEY configurada');
 
-  const client = new GoogleGenAI({ apiKey: key });
-  const prompt = buildPrompt(sales, expenses, period, userName);
+  const { start, label: periodoLabel } = getDateRange(period);
+  const filteredSales    = sales.filter(s => getSaleDate(s) >= start);
+  const filteredExpenses = expenses.filter(e => getExpenseDate(e) >= start);
 
+  const metrics = {
+    ingresos:      filteredSales.reduce((s, x) => s + x.total, 0),
+    gastos:        filteredExpenses.reduce((s, x) => s + x.amount, 0),
+    utilidad:      0,
+    transacciones: filteredSales.length + filteredExpenses.length,
+  };
+  metrics.utilidad = metrics.ingresos - metrics.gastos;
+
+  const chartData = computeChartData(sales, expenses, start, period);
+  const pieData   = computePieData(expenses, start);
+  const bestDay   = computeBestDay(sales, start);
+
+  const client = new GoogleGenAI({ apiKey: key });
+  const prompt  = buildPrompt(metrics, pieData, bestDay, periodoLabel, userName);
   const contents = [{ role: 'user', parts: [{ text: prompt }] }];
 
-  for (const model of REPORT_MODELS) {
+  for (const model of ['gemini-2.5-flash', 'gemini-2.0-flash']) {
     try {
-      const response = await client.models.generateContent({ model, contents } as any);
-      const raw = (response.text ?? '').trim();
-      if (!raw) continue;
-      return parseReport(raw);
+      const response = await client.models.generateContent({ model, contents, config: AI_CONFIG } as any);
+      const ai = JSON.parse(response.text ?? '{}');
+      return {
+        periodoLabel,
+        metrics,
+        chartData,
+        pieData,
+        bestDay,
+        descripcion:     ai.descripcion     ?? '',
+        insights:        ai.insights        ?? [],
+        recomendaciones: ai.recomendaciones ?? [],
+        conclusion:      ai.conclusion      ?? '',
+      };
     } catch (err: any) {
       console.warn(`[Report] ${model} falló:`, err?.message ?? err);
     }
