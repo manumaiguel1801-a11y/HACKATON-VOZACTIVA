@@ -12,6 +12,7 @@ import { ReportView } from './components/ReportView';
 import { CameraView } from './components/CameraView';
 import { InventorySalesView } from './components/InventorySalesView';
 import { PassportView } from './components/PassportView';
+import { AvalView } from './components/AvalView';
 import { ProfileView } from './components/ProfileView';
 import { ConsejeroView } from './components/ConsejeroView';
 import { CreditView } from './components/CreditView';
@@ -185,6 +186,15 @@ export default function App() {
               inventory={inventory}
               metas={metas}
               profile={profile}
+            />
+          </motion.div>
+        )}
+        {activeTab === 'aval' && (
+          <motion.div key="aval" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }}>
+            <AvalView
+              isDarkMode={isDarkMode}
+              prefillCedula={profile?.idNumber}
+              userName={profile?.firstName}
             />
           </motion.div>
         )}
