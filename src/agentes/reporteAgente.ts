@@ -1,11 +1,10 @@
 /**
  * Agente de reporte financiero — Voz Activa
  *
- * Loop basado en herramientas (tool_use) usando Anthropic Claude Haiku.
- * El agente decide qué datos necesita, llama las herramientas locales,
- * razona sobre los resultados y genera el reporte final.
+ * Loop de function calling con Gemini. El agente decide qué datos necesita,
+ * llama las herramientas locales, razona y genera el reporte final.
  */
-import Anthropic from '@anthropic-ai/sdk';
+import { GoogleGenAI, Type } from '@google/genai';
 import {
   Sale, Expense,
 } from '../types';
@@ -19,26 +18,26 @@ import {
 
 // ─── Herramientas disponibles para el agente ──────────────────────────────────
 
-const TOOLS: Anthropic.Tool[] = [
+const FUNCTION_DECLARATIONS = [
   {
     name: 'get_period_metrics',
     description: 'Obtiene ingresos, gastos, utilidad neta, margen y número de transacciones del período.',
-    input_schema: { type: 'object' as const, properties: {} },
+    parameters: { type: Type.OBJECT, properties: {} },
   },
   {
     name: 'compare_with_previous_period',
     description: 'Compara el período actual con el anterior de la misma duración. Detecta crecimiento o caída.',
-    input_schema: { type: 'object' as const, properties: {} },
+    parameters: { type: Type.OBJECT, properties: {} },
   },
   {
     name: 'get_expense_breakdown',
     description: 'Desglose de gastos por categoría, ordenado de mayor a menor con porcentaje del total.',
-    input_schema: { type: 'object' as const, properties: {} },
+    parameters: { type: Type.OBJECT, properties: {} },
   },
   {
     name: 'get_sales_trend',
     description: 'Tendencia de ventas: mejor y peor día de la semana, promedio diario y días sin actividad.',
-    input_schema: { type: 'object' as const, properties: {} },
+    parameters: { type: Type.OBJECT, properties: {} },
   },
 ];
 
@@ -128,6 +127,8 @@ function buildToolRunner(
 
 // ─── Punto de entrada del agente ─────────────────────────────────────────────
 
+const MODELS = ['gemini-2.5-flash', 'gemini-2.0-flash'];
+
 export async function generateFinancialReport(
   sales: Sale[],
   expenses: Expense[],
@@ -135,8 +136,8 @@ export async function generateFinancialReport(
   userName?: string,
   onStep?: (step: string) => void,
 ): Promise<ParsedReport> {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) throw new Error('No hay ANTHROPIC_API_KEY configurada. Agrégala en .env.local');
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) throw new Error('No hay GEMINI_API_KEY configurada. Agrégala en .env.local');
 
   const { start, label: periodoLabel } = getDateRange(period);
   const fSales    = sales.filter(s => getSaleDate(s) >= start);
@@ -147,9 +148,9 @@ export async function generateFinancialReport(
   const bestDay   = computeBestDay(sales, start);
   const runTool   = buildToolRunner(sales, expenses, fSales, fExpenses, period, start);
 
-  const client = new Anthropic({ apiKey, dangerouslyAllowBrowser: true });
+  const client = new GoogleGenAI({ apiKey });
 
-  const system = `Eres un analista financiero experto en pequeños negocios informales colombianos.
+  const systemInstruction = `Eres un analista financiero experto en pequeños negocios informales colombianos.
 Analiza los datos del negocio${userName ? ` de ${userName}` : ''} para el período: ${periodoLabel}.
 Usa las herramientas disponibles para recopilar todos los datos que necesites.
 Cuando tengas suficiente información, responde ÚNICAMENTE con un JSON válido con esta estructura exacta:
@@ -171,28 +172,44 @@ Cuando tengas suficiente información, responde ÚNICAMENTE con un JSON válido 
 }
 REGLAS: usa cifras reales, sin markdown, sin asteriscos, texto plano, español colombiano directo.`;
 
-  const messages: Anthropic.MessageParam[] = [
-    { role: 'user', content: 'Genera el reporte financiero completo.' },
+  const contents: any[] = [
+    { role: 'user', parts: [{ text: 'Genera el reporte financiero completo.' }] },
   ];
 
   onStep?.('Iniciando análisis del negocio...');
 
   // ── Loop del agente ────────────────────────────────────────────────────────
   for (let i = 0; i < 10; i++) {
-    const resp = await client.messages.create({
-      model: 'claude-haiku-4-5-20251001',
-      max_tokens: 4096,
-      system,
-      tools: TOOLS,
-      messages,
-    });
+    let response: any;
+    let lastErr: any;
 
-    messages.push({ role: 'assistant', content: resp.content });
+    for (const model of MODELS) {
+      try {
+        response = await client.models.generateContent({
+          model,
+          contents,
+          config: {
+            systemInstruction,
+            tools: [{ functionDeclarations: FUNCTION_DECLARATIONS }],
+          },
+        });
+        break;
+      } catch (err: any) {
+        console.warn(`[Gemini] ${model} falló:`, err?.message ?? err);
+        lastErr = err;
+      }
+    }
+    if (!response) throw lastErr;
+
+    const parts: any[] = response.candidates?.[0]?.content?.parts ?? [];
+    contents.push({ role: 'model', parts });
+
+    const functionCalls = parts.filter((p: any) => p.functionCall);
 
     // El agente terminó — extrae el JSON del reporte
-    if (resp.stop_reason === 'end_turn') {
+    if (functionCalls.length === 0) {
       onStep?.('Construyendo reporte...');
-      const text  = (resp.content.find(b => b.type === 'text') as Anthropic.TextBlock | undefined)?.text ?? '';
+      const text  = parts.filter((p: any) => p.text).map((p: any) => p.text).join('');
       const match = text.match(/\{[\s\S]*\}/);
       if (!match) throw new Error('El agente no devolvió un JSON válido. Intenta de nuevo.');
 
@@ -211,15 +228,19 @@ REGLAS: usa cifras reales, sin markdown, sin asteriscos, texto plano, español c
       };
     }
 
-    // El agente quiere usar una herramienta
-    if (resp.stop_reason === 'tool_use') {
-      const toolBlocks = resp.content.filter((b): b is Anthropic.ToolUseBlock => b.type === 'tool_use');
-      const results: Anthropic.ToolResultBlockParam[] = toolBlocks.map(b => {
-        onStep?.(STEP_LABELS[b.name] ?? `Ejecutando ${b.name}...`);
-        return { type: 'tool_result', tool_use_id: b.id, content: JSON.stringify(runTool(b.name)) };
-      });
-      messages.push({ role: 'user', content: results });
-    }
+    // El agente quiere usar herramientas
+    const functionResponses = functionCalls.map((p: any) => {
+      const name = p.functionCall.name;
+      onStep?.(STEP_LABELS[name] ?? `Ejecutando ${name}...`);
+      return {
+        functionResponse: {
+          name,
+          response: runTool(name),
+        },
+      };
+    });
+
+    contents.push({ role: 'user', parts: functionResponses });
   }
 
   throw new Error('El agente no completó el análisis. Intenta de nuevo.');
