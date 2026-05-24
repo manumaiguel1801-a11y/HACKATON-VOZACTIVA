@@ -7,6 +7,7 @@ import {
 import { cn } from '../lib/utils';
 import { AvalDashboard } from './AvalDashboard';
 import { IdentityVerification } from './IdentityVerification';
+import { Sale } from '../types';
 
 interface Props {
   isDarkMode: boolean;
@@ -14,6 +15,7 @@ interface Props {
   prefillCedula?: string;
   profileBirthDate?: string;
   userName?: string;
+  sales: Sale[];
 }
 
 type Step = 'info' | 'identity' | 'dashboard';
@@ -54,7 +56,7 @@ const REQUIREMENTS = [
   'Foto de perfil y datos básicos del negocio',
 ];
 
-export const AvalView = ({ isDarkMode, userId, prefillCedula = '', profileBirthDate = '', userName = '' }: Props) => {
+export const AvalView = ({ isDarkMode, userId, prefillCedula = '', profileBirthDate = '', userName = '', sales }: Props) => {
   const [step, setStep] = useState<Step>('info');
   const [verifiedName, setVerifiedName] = useState(userName);
   const [verifiedCedula, setVerifiedCedula] = useState(prefillCedula);
@@ -70,6 +72,7 @@ export const AvalView = ({ isDarkMode, userId, prefillCedula = '', profileBirthD
         isDarkMode={isDarkMode}
         cedula={verifiedCedula}
         userName={verifiedName}
+        sales={sales}
         onBack={() => setStep('info')}
       />
     );

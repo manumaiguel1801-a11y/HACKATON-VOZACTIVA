@@ -197,6 +197,7 @@ export default function App() {
               prefillCedula={profile?.idNumber}
               profileBirthDate={profile?.birthDate}
               userName={profile?.firstName}
+              sales={sales}
             />
           </motion.div>
         )}
