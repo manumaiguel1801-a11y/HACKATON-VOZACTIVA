@@ -2,7 +2,7 @@ import jsPDF from 'jspdf';
 import { doc as fsDoc, updateDoc, Timestamp } from 'firebase/firestore';
 import { db, auth } from '../firebase';
 import { Sale, Expense, Debt, UserProfile } from '../types';
-import { calculateScore, getScoreLabel, ScoreBreakdown, getBusinessAgeDays, getMonthlyProjection } from './scoringService';
+import { calculateScore, getScoreLabel, ScoreBreakdown, getBusinessAgeDays, getMonthlyProjection, ExtractoSummary } from './scoringService';
 
 // ─── Paleta ──────────────────────────────────────────���─────────────────────────
 const C = {
@@ -147,6 +147,51 @@ function scoreBar(doc: jsPDF, score: number, x: number, y: number, w: number) {
   doc.text('Excelente', x + w * 0.875, y + 9, { align: 'center' });
 }
 
+// ─── Llamada al agente de reporte ─────────────────────────────────────────────
+async function fetchPassportReport(
+  bd: ScoreBreakdown,
+  nombre: string,
+  totalIngresos: number,
+  totalGastos: number,
+  businessAgeDays: number,
+  extractos: ExtractoSummary[],
+): Promise<{ narrativa: string; fortalezas: string[] }> {
+  try {
+    const res = await fetch('/api/passport-report', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        nombre,
+        scoreFinal:           bd.scoreFinal,
+        consistenciaIngresos: bd.consistenciaIngresos,
+        capacidadPago:        bd.capacidadPago,
+        gestionFiados:        bd.gestionFiados,
+        saludInventario:      bd.saludInventario,
+        calidadDatos:         bd.calidadDatos,
+        respaldoBancario:     bd.respaldoBancario,
+        hasExtracto:          bd.hasExtracto,
+        totalIngresos,
+        totalGastos,
+        businessAgeDays,
+        extractos: extractos.map(e => ({
+          totalIngresos:           e.totalIngresos,
+          totalGastos:             e.totalGastos,
+          porcentajeVentas:        e.porcentajeVentas,
+          consistenciaVentas:      e.consistenciaVentas,
+          mesesConActividad:       e.mesesConActividad,
+          promedioMensualIngresos: e.promedioMensualIngresos,
+          passwordUnlocked:        e.passwordUnlocked,
+          miniAnalisis:            e.miniAnalisis,
+        })),
+      }),
+    });
+    if (!res.ok) return { narrativa: '', fortalezas: [] };
+    return await res.json();
+  } catch {
+    return { narrativa: '', fortalezas: [] };
+  }
+}
+
 // ─── Generador principal ──────────────────────────────────────────────────────
 export async function generatePassportPDF(
   profile: UserProfile | null,
@@ -155,6 +200,7 @@ export async function generatePassportPDF(
   debts: Debt[],
   userId?: string,
   baseUrl?: string,
+  extractos: ExtractoSummary[] = [],
 ): Promise<{ blob: Blob; filename: string }> {
   const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
   const W = 210;
@@ -162,16 +208,27 @@ export async function generatePassportPDF(
   const CW = W - M * 2;  // content width
   const now = new Date();
 
-  const bd: ScoreBreakdown = calculateScore(sales, expenses, debts);
-  const totalIngresos = sales.reduce((s, v) => s + v.total, 0);
-  const totalGastos   = expenses.reduce((s, e) => s + e.amount, 0);
-  const margenNeto    = totalIngresos > 0
+  const bd: ScoreBreakdown = calculateScore(sales, expenses, debts, extractos);
+
+  const salesIngresos   = sales.reduce((s, v) => s + v.total, 0);
+  const expensesGastos  = expenses.reduce((s, e) => s + e.amount, 0);
+  // Cuando no hay datos de la app, usar totales del extracto
+  const totalIngresos   = salesIngresos   > 0 ? salesIngresos   : extractos.reduce((s, e) => s + e.totalIngresos, 0);
+  const totalGastos     = expensesGastos  > 0 ? expensesGastos  : extractos.reduce((s, e) => s + e.totalGastos,   0);
+  const margenNeto      = totalIngresos   > 0
     ? Math.round(((totalIngresos - totalGastos) / totalIngresos) * 100)
     : 0;
 
   const nombre   = profile ? `${profile.firstName} ${profile.lastName}` : 'Usuario Voz-Activa';
   const cedula   = profile?.idNumber ?? '—';
   const telefono = profile?.phone    ?? '—';
+
+  // Llamada al agente — en paralelo con el resto de la preparación
+  const agentPromise = fetchPassportReport(
+    bd, nombre, totalIngresos, totalGastos,
+    getBusinessAgeDays(sales, expenses, debts),
+    extractos,
+  );
 
   // Código de verificación persistente (reusar si no expiró)
   let verifCode: string;
@@ -270,11 +327,13 @@ export async function generatePassportPDF(
   sectionTitle(doc, 'Datos del Titular', M, y, CW);
   y += 7;
 
-  // Col izquierda: nombre + cedula + tel
+  // Col izquierda: nombre + cedula + tel (ancho máximo antes de la col de fechas)
+  const nombreMaxW = W - M - 55 - M - 4; // ~124mm
   rgb(doc, 'text', C.dark);
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(13);
-  doc.text(nombre, M, y);
+  const nombreLines = doc.splitTextToSize(nombre, nombreMaxW);
+  doc.text(nombreLines[0] + (nombreLines.length > 1 ? '…' : ''), M, y);
   y += 6;
 
   doc.setFont('helvetica', 'normal');
@@ -346,11 +405,19 @@ export async function generatePassportPDF(
   sectionTitle(doc, 'Resumen Financiero', M, y, CW);
   y += 7;
 
+  const bestExtracto = extractos.length > 0
+    ? extractos.reduce((a, b) => a.totalIngresos > b.totalIngresos ? a : b)
+    : null;
+  const cuartaMetrica = sales.length > 0
+    ? { label: 'Ventas registradas',  value: `${sales.length} transacciones` }
+    : bestExtracto?.mesesConActividad
+      ? { label: 'Meses activo',        value: `${bestExtracto.mesesConActividad} mes${bestExtracto.mesesConActividad !== 1 ? 'es' : ''}` }
+      : { label: 'Fuente',             value: 'Extracto bancario' };
   const metrics = [
     { label: 'Ingresos totales',    value: formatCOP(totalIngresos) },
     { label: 'Gastos registrados',  value: formatCOP(totalGastos) },
     { label: 'Margen neto',         value: `${margenNeto}%` },
-    { label: 'Ventas registradas',  value: `${sales.length} transacciones` },
+    cuartaMetrica,
   ];
 
   const halfCW = (CW - 4) / 2;
@@ -388,6 +455,7 @@ export async function generatePassportPDF(
     { label: 'Gestión de fiados y deudas',       value: bd.gestionFiados,        max: 20 },
     { label: 'Salud de inventario',              value: bd.saludInventario,      max: 15 },
     { label: 'Calidad y confiabilidad de datos', value: bd.calidadDatos,         max: 10 },
+    ...(bd.hasExtracto ? [{ label: 'Respaldo bancario verificado', value: bd.respaldoBancario, max: 20 }] : []),
   ];
 
   factors.forEach((f, i) => {
@@ -424,21 +492,32 @@ export async function generatePassportPDF(
 
   y += 8;
 
-  // ── 6. CERTIFICACIÓN ─────────────────────────────────────────────────────────
-  sectionTitle(doc, 'Certificación', M, y, CW);
-  y += 7;
+  // ── 6. CERTIFICACIÓN (narrativa generada por el agente IA) ───────────────────
+  const agentReport = await agentPromise;
 
-  const certH = 26;
+  const certRaw = agentReport.narrativa?.trim()
+    ? agentReport.narrativa
+    : `${nombre} ha registrado actividad comercial verificada en la plataforma Voz-Activa con un score de ${bd.scoreFinal} puntos (${getScoreLabel(bd.scoreFinal)}). El scoring se basa en comportamiento real: consistencia de ventas, capacidad de ahorro, gestión de cartera y calidad de registros financieros. Este documento puede presentarse ante bancos, cooperativas y microfinancieras como prueba alternativa de capacidad de pago.`;
+
+  const certTextW = CW - 10;
+  const certLines = doc.splitTextToSize(certRaw, certTextW);
+  const certH = Math.max(26, 12 + certLines.length * 4 + 2);
+
+  const hasFortalezas = agentReport.fortalezas?.length > 0;
+  const fortalezasH = hasFortalezas ? 4 + agentReport.fortalezas.length * 5 : 0;
+  const totalCertH = certH + fortalezasH;
+
+  sectionTitle(doc, hasFortalezas ? 'Certificación · Análisis IA' : 'Certificación', M, y, CW);
+  y += 7;
 
   rgb(doc, 'fill', C.cream);
   rgb(doc, 'draw', C.gold);
   doc.setLineWidth(0.4);
-  doc.roundedRect(M, y, CW, certH, 2, 2, 'FD');
+  doc.roundedRect(M, y, CW, totalCertH, 2, 2, 'FD');
   rgb(doc, 'fill', C.gold);
-  doc.roundedRect(M, y, 3, certH, 1, 1, 'F');
+  doc.roundedRect(M, y, 3, totalCertH, 1, 1, 'F');
 
   const cx = M + CW / 2;
-  const certTextW = CW - 10; // 5mm de margen a cada lado
 
   rgb(doc, 'text', C.dark);
   doc.setFont('helvetica', 'bold');
@@ -448,11 +527,25 @@ export async function generatePassportPDF(
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(7.5);
   rgb(doc, 'text', C.gray);
-  const certRaw = `El titular ha registrado actividad comercial verificada en la plataforma Voz-Activa. El scoring se basa en comportamiento real: consistencia de ventas, capacidad de ahorro, gestión de cartera y calidad de registros financieros. Este documento puede presentarse ante bancos, cooperativas y microfinancieras como prueba alternativa de capacidad de pago.`;
-  const certLines = doc.splitTextToSize(certRaw, certTextW);
   certLines.forEach((line: string, i: number) => doc.text(line, cx, y + 13 + i * 4, { align: 'center' }));
 
-  y += certH + 6;
+  if (hasFortalezas) {
+    const forY = y + certH + 1;
+    rgb(doc, 'fill', C.gold);
+    doc.roundedRect(M + 3, forY, CW - 6, 0.4, 0, 0, 'F');
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(6.5);
+    rgb(doc, 'text', C.gold);
+    doc.text('FORTALEZAS CREDITICIAS', M + 6, forY + 4);
+    doc.setFont('helvetica', 'normal');
+    rgb(doc, 'text', C.dark);
+    agentReport.fortalezas.forEach((f, i) => {
+      const fLines = doc.splitTextToSize(`✦  ${f}`, CW - 14);
+      doc.text(fLines[0], M + 6, forY + 4 + (i + 1) * 4.5);
+    });
+  }
+
+  y += totalCertH + 6;
 
   // ── 7. CÓDIGO DE VERIFICACIÓN ─────────────────────────────────��───────────
   rgb(doc, 'fill', [242, 238, 218]);

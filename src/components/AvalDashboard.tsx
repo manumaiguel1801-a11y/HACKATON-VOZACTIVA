@@ -1,38 +1,38 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
-  ShieldCheck, FileText, Upload, CheckCircle2,
-  Lock, BarChart3, Building2, X,
-  FileCheck, AlertCircle, Sparkles, QrCode, Loader2,
+  ShieldCheck, Upload, CheckCircle2,
+  Lock, X, Trash2,
+  FileCheck, AlertCircle, Sparkles, Loader2,
   TrendingUp, TrendingDown, ChevronDown, ChevronUp, Smartphone,
-  Info, LogOut,
+  Info, LogOut, Download,
 } from 'lucide-react';
+import { collection, addDoc, getDocs, deleteDoc, doc, getDoc, serverTimestamp, query, orderBy } from 'firebase/firestore';
+import { db } from '../firebase';
 import { cn } from '../lib/utils';
 import { analyzeExtracto, ExtractoAnalysis } from '../services/extractoService';
-import { Sale } from '../types';
+import { generatePassportPDF } from '../services/pdfService';
+import { ExtractoSummary } from '../services/scoringService';
+import { UserProfile } from '../types';
 
 interface Props {
   isDarkMode: boolean;
   cedula: string;
   userName?: string;
-  sales: Sale[];
+  userId: string;
   onBack: () => void;
 }
 
 interface UploadedFile {
   id: string;
+  docId?: string;
   name: string;
   size: string;
   status: 'analizando' | 'analizado' | 'error';
   analysis?: ExtractoAnalysis;
   errorMsg?: string;
+  agentStep?: string;
 }
 
-const FEATURE_CARDS = [
-  { id: 'certificado', icon: FileText,  title: 'Mi certificado',      desc: 'PDF crediticio con QR verificable',            color: 'text-[#B8860B]',  bg: 'bg-[#B8860B]/10' },
-  { id: 'historial',  icon: BarChart3,  title: 'Historial verificado', desc: 'Ventas y gastos con sello de autenticidad',    color: 'text-purple-500', bg: 'bg-purple-500/10' },
-  { id: 'bancos',     icon: Building2,  title: 'Conectar con bancos',  desc: 'Comparte tu perfil con entidades financieras', color: 'text-blue-500',   bg: 'bg-blue-500/10' },
-  { id: 'qr',         icon: QrCode,     title: 'Mi QR de verificación',desc: 'Código único que valida tu identidad',         color: 'text-green-500',  bg: 'bg-green-500/10' },
-];
 
 interface BankTip {
   name: string;
@@ -133,20 +133,6 @@ const TIPO_LABEL: Record<string, string> = {
   otro:                   '⚪ Otro',
 };
 
-function NivelBadge({ nivel }: { nivel: 'alto' | 'medio' | 'bajo' }) {
-  const map = {
-    alto:  { label: 'Confianza ALTA',  cls: 'bg-green-500/15 text-green-600' },
-    medio: { label: 'Confianza MEDIA', cls: 'bg-yellow-500/15 text-yellow-600' },
-    bajo:  { label: 'Confianza BAJA',  cls: 'bg-red-500/15 text-red-500' },
-  };
-  const { label, cls } = map[nivel];
-  return (
-    <span className={cn('text-[10px] font-black uppercase tracking-widest px-2.5 py-1 rounded-full', cls)}>
-      {label}
-    </span>
-  );
-}
-
 function ScoreBar({ value, color }: { value: number; color: string }) {
   return (
     <div className="flex items-center gap-2 flex-1">
@@ -158,23 +144,25 @@ function ScoreBar({ value, color }: { value: number; color: string }) {
   );
 }
 
-function AnalysisCard({ analysis, isDarkMode, text, muted }: {
+function AnalysisCard({ analysis, isDarkMode, text, muted, onRemove }: {
   analysis: ExtractoAnalysis;
   isDarkMode: boolean;
   text: string;
   muted: string;
+  onRemove?: () => void;
 }) {
   const [showTx, setShowTx] = useState(false);
   const label = ENTIDAD_LABEL[analysis.entidad] ?? 'Extracto';
 
   return (
     <div className={cn('rounded-xl p-4 space-y-4', isDarkMode ? 'bg-[#0D0D0D]' : 'bg-[#FDFBF0]')}>
-      <div className="flex items-center justify-between">
+      {/* Header */}
+      <div className="flex items-center gap-2">
+        <CheckCircle2 className="w-4 h-4 text-green-500 flex-shrink-0" />
         <div>
           <p className="text-xs font-black uppercase tracking-widest text-[#B8860B]">{label}</p>
-          <p className={cn('text-sm font-black mt-0.5', text)}>Análisis completado</p>
+          <p className={cn('text-sm font-black', text)}>Análisis completado</p>
         </div>
-        <NivelBadge nivel={analysis.nivel} />
       </div>
 
       {analysis.passwordUnlocked && (
@@ -184,47 +172,40 @@ function AnalysisCard({ analysis, isDarkMode, text, muted }: {
         </div>
       )}
 
+      {/* Ingresos vs Gastos */}
       <div className={cn('rounded-xl p-3 space-y-2.5', isDarkMode ? 'bg-white/5' : 'bg-white')}>
         <div className="flex justify-between items-center">
-          <span className={cn('text-xs', muted)}>Ingresos totales</span>
-          <span className={cn('text-sm font-black', text)}>{formatCOP(analysis.totalIngresos)}</span>
-        </div>
-        <div>
-          <div className="flex justify-between items-center mb-1">
-            <span className="text-xs font-bold text-green-600 flex items-center gap-1">
-              <TrendingUp className="w-3 h-3" />Ventas identificadas
-            </span>
-            <span className="text-sm font-black text-green-600">{formatCOP(analysis.ingresosVentas)}</span>
-          </div>
-          <ScoreBar value={analysis.porcentajeVentas} color="bg-green-500" />
-        </div>
-        <div>
-          <div className="flex justify-between items-center mb-1">
-            <span className={cn('text-xs font-bold flex items-center gap-1', muted)}>
-              <TrendingDown className="w-3 h-3" />Transferencias / otros
-            </span>
-            <span className={cn('text-sm font-black', muted)}>{formatCOP(analysis.ingresosTransferencias)}</span>
-          </div>
-          <ScoreBar value={100 - analysis.porcentajeVentas} color="bg-black/20" />
-        </div>
-      </div>
-
-      <div className={cn('rounded-xl p-3', isDarkMode ? 'bg-white/5' : 'bg-white')}>
-        <div className="flex justify-between items-center mb-1.5">
-          <span className={cn('text-xs font-bold', text)}>Cruce con Voz-Activa</span>
-          <span className={cn('text-xs font-black', analysis.consistenciaConApp >= 60 ? 'text-green-600' : analysis.consistenciaConApp >= 40 ? 'text-yellow-600' : 'text-red-500')}>
-            {analysis.consistenciaConApp}%
+          <span className="text-xs font-bold text-green-600 flex items-center gap-1">
+            <TrendingUp className="w-3 h-3" />Ingresos totales
           </span>
+          <span className="text-sm font-black text-green-600">{formatCOP(analysis.totalIngresos)}</span>
         </div>
-        <ScoreBar
-          value={analysis.consistenciaConApp}
-          color={analysis.consistenciaConApp >= 60 ? 'bg-[#B8860B]' : analysis.consistenciaConApp >= 40 ? 'bg-yellow-500' : 'bg-red-400'}
-        />
-        <p className={cn('text-[10px] mt-2 leading-snug', muted)}>
-          Días donde tus ingresos del extracto coinciden con tus ventas registradas en la app
-        </p>
+        <div className="flex justify-between items-center">
+          <span className={cn('text-xs font-bold flex items-center gap-1', 'text-red-500')}>
+            <TrendingDown className="w-3 h-3" />Gastos / retiros
+          </span>
+          <span className="text-sm font-black text-red-500">{formatCOP(analysis.totalGastos)}</span>
+        </div>
+        {analysis.totalIngresos > 0 && (
+          <div className="pt-1">
+            <div className="flex justify-between items-center mb-1">
+              <span className={cn('text-[10px]', muted)}>Cobros QR / ventas directas</span>
+              <span className={cn('text-[10px] font-black', muted)}>{analysis.porcentajeVentas}%</span>
+            </div>
+            <ScoreBar value={analysis.porcentajeVentas} color="bg-[#B8860B]" />
+          </div>
+        )}
       </div>
 
+      {/* Mini análisis IA */}
+      {analysis.miniAnalisis && (
+        <div className={cn('rounded-xl p-3 flex items-start gap-2.5', isDarkMode ? 'bg-white/5' : 'bg-white')}>
+          <Sparkles className="w-3.5 h-3.5 text-[#B8860B] flex-shrink-0 mt-0.5" />
+          <p className={cn('text-xs leading-relaxed', text)}>{analysis.miniAnalisis}</p>
+        </div>
+      )}
+
+      {/* Transacciones desplegables */}
       {analysis.transactions.length > 0 && (
         <div>
           <button
@@ -255,29 +236,147 @@ function AnalysisCard({ analysis, isDarkMode, text, muted }: {
           )}
         </div>
       )}
+
+      {onRemove && (
+        <button
+          onClick={onRemove}
+          className={cn(
+            'w-full flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-bold transition-all active:scale-[0.98]',
+            isDarkMode ? 'text-red-400/70 hover:bg-red-500/10 hover:text-red-400' : 'text-red-400 hover:bg-red-50',
+          )}
+        >
+          <Trash2 className="w-3.5 h-3.5" />
+          Eliminar análisis
+        </button>
+      )}
     </div>
   );
 }
 
-export const AvalDashboard = ({ isDarkMode, cedula, userName, sales, onBack }: Props) => {
+export const AvalDashboard = ({ isDarkMode, cedula, userName, userId, onBack }: Props) => {
   const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
   const [isDragging, setIsDragging]       = useState(false);
   const [showTips, setShowTips]           = useState(false);
   const [showCloseModal, setShowCloseModal] = useState(false);
   const [openBank, setOpenBank]           = useState<string | null>(null);
+  const [isDownloading, setIsDownloading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Cargar análisis guardados al montar
+  useEffect(() => {
+    const load = async () => {
+      try {
+        const col = collection(db, 'users', userId, 'extractos');
+        const snap = await getDocs(query(col, orderBy('analyzedAt', 'desc')));
+        const loaded: UploadedFile[] = snap.docs.map(d => {
+          const data = d.data();
+          return {
+            id: d.id,
+            docId: d.id,
+            name: data.fileName ?? 'extracto.pdf',
+            size: data.fileSize ?? '',
+            status: 'analizado' as const,
+            analysis: {
+              entidad:                data.entidad                ?? 'otro',
+              totalIngresos:          data.totalIngresos          ?? 0,
+              totalGastos:            data.totalGastos            ?? 0,
+              ingresosVentas:         data.ingresosVentas         ?? 0,
+              ingresosTransferencias: data.ingresosTransferencias ?? 0,
+              porcentajeVentas:       data.porcentajeVentas       ?? 0,
+              transactions:           data.transactions           ?? [],
+              miniAnalisis:           data.miniAnalisis           ?? '',
+              passwordUnlocked:       data.passwordUnlocked       ?? false,
+              consistenciaVentas:     data.consistenciaVentas     ?? 0,
+              mesesConActividad:      data.mesesConActividad      ?? 0,
+              promedioMensualIngresos:data.promedioMensualIngresos?? 0,
+            },
+          };
+        });
+        setUploadedFiles(loaded);
+      } catch { /* silencioso si no hay datos */ }
+    };
+    load();
+  }, [userId]);
 
   const card  = cn('rounded-2xl p-5', isDarkMode ? 'bg-[#1A1A1A]' : 'bg-white');
   const muted = isDarkMode ? 'text-white/40' : 'text-black/40';
   const text  = isDarkMode ? 'text-[#FDFBF0]' : 'text-[#2e2f2d]';
+
+  const handleDownloadPDF = async () => {
+    if (isDownloading || completedAnalyses.length === 0) return;
+    setIsDownloading(true);
+    try {
+      const userSnap = await getDoc(doc(db, 'users', userId));
+      const userData = userSnap.data();
+      const minimalProfile: UserProfile = {
+        firstName: userData?.firstName || userName || 'Usuario',
+        lastName:  userData?.lastName  || '',
+        idNumber:  cedula,
+        phone:     userData?.phone     || '',
+        birthDate: '',
+        createdAt: null,
+      };
+      const extractos: ExtractoSummary[] = completedAnalyses
+        .filter(f => f.analysis)
+        .map(f => ({
+          totalIngresos:           f.analysis!.totalIngresos,
+          totalGastos:             f.analysis!.totalGastos,
+          porcentajeVentas:        f.analysis!.porcentajeVentas,
+          passwordUnlocked:        f.analysis!.passwordUnlocked,
+          consistenciaVentas:      f.analysis!.consistenciaVentas,
+          mesesConActividad:       f.analysis!.mesesConActividad,
+          promedioMensualIngresos: f.analysis!.promedioMensualIngresos,
+          miniAnalisis:            f.analysis!.miniAnalisis,
+        }));
+      const { blob, filename } = await generatePassportPDF(
+        minimalProfile,
+        [], [], [],
+        userId,
+        undefined,
+        extractos,
+      );
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err: any) {
+      console.error('[AvalDashboard] Error generando PDF:', err);
+    } finally {
+      setIsDownloading(false);
+    }
+  };
 
   const maskedCedula = cedula.length > 4 ? '••••••' + cedula.slice(-4) : cedula;
   const completedAnalyses = uploadedFiles.filter(f => f.status === 'analizado' && f.analysis);
 
   const processFile = async (file: File, id: string) => {
     try {
-      const analysis = await analyzeExtracto(file, sales, cedula);
-      setUploadedFiles(prev => prev.map(f => f.id === id ? { ...f, status: 'analizado', analysis } : f));
+      const analysis = await analyzeExtracto(file, cedula, (step) => {
+        setUploadedFiles(prev => prev.map(f => f.id === id ? { ...f, agentStep: step } : f));
+      });
+      const col = collection(db, 'users', userId, 'extractos');
+      const docRef = await addDoc(col, {
+        fileName:                file.name,
+        fileSize:                formatBytes(file.size),
+        analyzedAt:              serverTimestamp(),
+        entidad:                 analysis.entidad,
+        totalIngresos:           analysis.totalIngresos,
+        totalGastos:             analysis.totalGastos,
+        ingresosVentas:          analysis.ingresosVentas,
+        ingresosTransferencias:  analysis.ingresosTransferencias,
+        porcentajeVentas:        analysis.porcentajeVentas,
+        transactions:            analysis.transactions,
+        miniAnalisis:            analysis.miniAnalisis,
+        passwordUnlocked:        analysis.passwordUnlocked,
+        consistenciaVentas:      analysis.consistenciaVentas,
+        mesesConActividad:       analysis.mesesConActividad,
+        promedioMensualIngresos: analysis.promedioMensualIngresos,
+      });
+      setUploadedFiles(prev => prev.map(f =>
+        f.id === id ? { ...f, status: 'analizado', analysis, docId: docRef.id } : f,
+      ));
     } catch (err: any) {
       setUploadedFiles(prev => prev.map(f => f.id === id ? { ...f, status: 'error', errorMsg: err.message } : f));
     }
@@ -292,7 +391,13 @@ export const AvalDashboard = ({ isDarkMode, cedula, userName, sales, onBack }: P
     });
   };
 
-  const removeFile = (id: string) => setUploadedFiles(prev => prev.filter(f => f.id !== id));
+  const removeFile = async (id: string) => {
+    const file = uploadedFiles.find(f => f.id === id);
+    if (file?.docId) {
+      try { await deleteDoc(doc(db, 'users', userId, 'extractos', file.docId)); } catch { /* ignora */ }
+    }
+    setUploadedFiles(prev => prev.filter(f => f.id !== id));
+  };
 
   return (
     <div className="space-y-5 pb-10 animate-in fade-in slide-in-from-bottom-4 duration-500">
@@ -479,7 +584,7 @@ export const AvalDashboard = ({ isDarkMode, cedula, userName, sales, onBack }: P
           </div>
         )}
 
-        {/* Drop zone */}
+        {/* Drop zone — siempre activa */}
         <div
           onDragOver={e => { e.preventDefault(); setIsDragging(true); }}
           onDragLeave={() => setIsDragging(false)}
@@ -507,7 +612,7 @@ export const AvalDashboard = ({ isDarkMode, cedula, userName, sales, onBack }: P
           </div>
           <div className="text-center">
             <p className={cn('text-sm font-black', text)}>Toca para subir o arrastra aquí</p>
-            <p className={cn('text-xs mt-0.5', muted)}>Solo archivos PDF</p>
+            <p className={cn('text-xs mt-0.5', muted)}>Solo archivos PDF · Hasta 3 meses para mejor análisis</p>
           </div>
         </div>
 
@@ -530,7 +635,7 @@ export const AvalDashboard = ({ isDarkMode, cedula, userName, sales, onBack }: P
                   <div className="flex-1 min-w-0">
                     <p className={cn('text-xs font-bold truncate', text)}>{f.name}</p>
                     <p className={cn('text-[10px]', f.status === 'analizando' ? 'text-[#B8860B]' : f.status === 'analizado' ? 'text-green-500' : 'text-red-400')}>
-                      {f.status === 'analizando' ? '⏳ Analizando con IA...'
+                      {f.status === 'analizando' ? (f.agentStep ?? '⏳ Analizando con IA...')
                         : f.status === 'analizado' ? `✓ Analizado · ${f.size}`
                         : `✗ ${f.errorMsg ?? 'Error al analizar'}`}
                     </p>
@@ -543,7 +648,7 @@ export const AvalDashboard = ({ isDarkMode, cedula, userName, sales, onBack }: P
                   </button>
                 </div>
                 {f.status === 'analizado' && f.analysis && (
-                  <AnalysisCard analysis={f.analysis} isDarkMode={isDarkMode} text={text} muted={muted} />
+                  <AnalysisCard analysis={f.analysis} isDarkMode={isDarkMode} text={text} muted={muted} onRemove={() => removeFile(f.id)} />
                 )}
               </div>
             ))}
@@ -564,28 +669,22 @@ export const AvalDashboard = ({ isDarkMode, cedula, userName, sales, onBack }: P
         </div>
       </div>
 
-      {/* Próximamente */}
-      <div>
-        <p className={cn('text-[10px] font-black uppercase tracking-widest px-1 mb-3', muted)}>Próximamente</p>
-        <div className="grid grid-cols-2 gap-3">
-          {FEATURE_CARDS.map(fc => (
-            <div key={fc.id} className={cn('rounded-2xl p-4 flex flex-col gap-3 relative overflow-hidden', isDarkMode ? 'bg-[#1A1A1A]' : 'bg-white')}>
-              <div className={cn('w-9 h-9 rounded-xl flex items-center justify-center', fc.bg)}>
-                <fc.icon className={cn('w-4 h-4', fc.color)} />
-              </div>
-              <div>
-                <p className={cn('text-xs font-black', text)}>{fc.title}</p>
-                <p className={cn('text-[10px] leading-snug mt-0.5', muted)}>{fc.desc}</p>
-              </div>
-              <div className="absolute top-3 right-3">
-                <span className={cn('text-[8px] font-black uppercase tracking-wide px-1.5 py-0.5 rounded-full', isDarkMode ? 'bg-white/8 text-white/30' : 'bg-black/5 text-black/30')}>
-                  Pronto
-                </span>
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
+{completedAnalyses.length > 0 && (
+        <button
+          onClick={handleDownloadPDF}
+          disabled={isDownloading}
+          className={cn(
+            'w-full flex items-center justify-center gap-2.5 py-4 rounded-2xl font-black text-sm transition-all active:scale-[0.98]',
+            isDownloading
+              ? isDarkMode ? 'bg-[#B8860B]/20 text-white/30 cursor-not-allowed' : 'bg-[#B8860B]/20 text-black/30 cursor-not-allowed'
+              : 'bg-gradient-to-r from-[#B8860B] to-[#DAA520] text-white shadow-lg',
+          )}
+        >
+          {isDownloading
+            ? <><Loader2 className="w-4 h-4 animate-spin" />Generando pasaporte...</>
+            : <><Download className="w-4 h-4" />Descargar Pasaporte PDF</>}
+        </button>
+      )}
 
       <div className={cn('rounded-2xl p-4 flex gap-3', isDarkMode ? 'bg-white/5' : 'bg-black/3')}>
         <Sparkles className="w-4 h-4 flex-shrink-0 mt-0.5 text-[#B8860B]" />

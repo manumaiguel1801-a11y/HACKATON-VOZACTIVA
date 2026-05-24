@@ -1,4 +1,3 @@
-import { GoogleGenAI, Type } from '@google/genai';
 import { Sale, Expense } from '../types';
 
 export type ReportPeriod = 'hoy' | '7d' | '14d' | '21d' | 'mes' | '3m' | '6m' | 'all';
@@ -33,16 +32,16 @@ export interface ParsedReport {
 }
 
 const PIE_COLORS = ['#B8860B', '#3B82F6', '#8B5CF6', '#EF4444', '#22C55E', '#F59E0B'];
-const DAY_NAMES  = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
+export const DAY_NAMES  = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
 
-function getSaleDate(s: Sale): Date {
+export function getSaleDate(s: Sale): Date {
   return s.createdAt?.toDate ? s.createdAt.toDate() : new Date();
 }
-function getExpenseDate(e: Expense): Date {
+export function getExpenseDate(e: Expense): Date {
   return e.createdAt?.toDate ? e.createdAt.toDate() : new Date();
 }
 
-function getDateRange(period: ReportPeriod): { start: Date; label: string } {
+export function getDateRange(period: ReportPeriod): { start: Date; label: string } {
   const now = new Date();
 
   if (period === 'hoy') {
@@ -69,7 +68,7 @@ function getDateRange(period: ReportPeriod): { start: Date; label: string } {
   };
 }
 
-function computeChartData(sales: Sale[], expenses: Expense[], start: Date, period: ReportPeriod): ChartPoint[] {
+export function computeChartData(sales: Sale[], expenses: Expense[], start: Date, period: ReportPeriod): ChartPoint[] {
   const now = new Date();
 
   if (period === 'hoy') {
@@ -117,7 +116,7 @@ function computeChartData(sales: Sale[], expenses: Expense[], start: Date, perio
   return days;
 }
 
-function computePieData(expenses: Expense[], start: Date): PieSlice[] {
+export function computePieData(expenses: Expense[], start: Date): PieSlice[] {
   const map = new Map<string, number>();
   expenses.filter(e => getExpenseDate(e) >= start).forEach(e => {
     map.set(e.concept, (map.get(e.concept) ?? 0) + e.amount);
@@ -134,7 +133,7 @@ function computePieData(expenses: Expense[], start: Date): PieSlice[] {
   return slices;
 }
 
-function computeBestDay(sales: Sale[], start: Date): { name: string; amount: number } | null {
+export function computeBestDay(sales: Sale[], start: Date): { name: string; amount: number } | null {
   const map = new Map<string, number>();
   sales.filter(s => getSaleDate(s) >= start).forEach(s => {
     const key = DAY_NAMES[getSaleDate(s).getDay()];
@@ -199,112 +198,3 @@ export function filterByPeriod(sales: Sale[], expenses: Expense[], period: Repor
   };
 }
 
-const AI_CONFIG = {
-  responseMimeType: 'application/json',
-  responseSchema: {
-    type: Type.OBJECT,
-    properties: {
-      descripcion:     { type: Type.STRING },
-      insights: {
-        type: Type.ARRAY,
-        items: {
-          type: Type.OBJECT,
-          properties: { titulo: { type: Type.STRING }, texto: { type: Type.STRING } },
-          required: ['titulo', 'texto'],
-        },
-      },
-      recomendaciones: {
-        type: Type.ARRAY,
-        items: {
-          type: Type.OBJECT,
-          properties: { titulo: { type: Type.STRING }, texto: { type: Type.STRING } },
-          required: ['titulo', 'texto'],
-        },
-      },
-      conclusion: { type: Type.STRING },
-    },
-    required: ['descripcion', 'insights', 'recomendaciones', 'conclusion'],
-  },
-};
-
-function buildPrompt(
-  metrics: ParsedReport['metrics'],
-  pieData: PieSlice[],
-  bestDay: { name: string; amount: number } | null,
-  periodoLabel: string,
-  userName?: string,
-): string {
-  const fmt = (v: number) => `$${v.toLocaleString('es-CO')}`;
-  const gastosPie = pieData.map(p => `${p.name}: ${p.value}%`).join(', ') || 'Sin datos';
-  return `Eres un analista financiero experto en pequeños negocios informales latinoamericanos.
-
-Analiza estos datos reales y genera un reporte financiero util en español.
-
-DATOS DEL PERIODO: ${periodoLabel}
-- Negocio: ${userName ? `Negocio de ${userName}` : 'Mi Negocio'}
-- Ingresos: ${fmt(metrics.ingresos)}
-- Gastos: ${fmt(metrics.gastos)}
-- Utilidad neta: ${fmt(metrics.utilidad)}
-- Transacciones: ${metrics.transacciones}
-- Distribucion de gastos: ${gastosPie}
-- Mejor dia de ventas: ${bestDay ? `${bestDay.name} con ${fmt(bestDay.amount)}` : 'Sin datos suficientes'}
-
-Devuelve JSON con estos campos:
-- "descripcion": 2 oraciones describiendo el negocio y su comportamiento en el periodo
-- "insights": exactamente 4 objetos {titulo, texto} con hallazgos clave (mezcla positivos y negativos)
-- "recomendaciones": exactamente 4 objetos {titulo, texto} con acciones concretas basadas en los numeros reales
-- "conclusion": una sola oracion contundente sobre el estado actual del negocio
-
-REGLAS: usa numeros reales del reporte, no inventes datos, no uses markdown (sin asteriscos, hashtags ni guiones decorativos), escribe en texto plano, se directo y concreto.`;
-}
-
-export async function generateFinancialReport(
-  sales: Sale[],
-  expenses: Expense[],
-  period: ReportPeriod,
-  userName?: string,
-): Promise<ParsedReport> {
-  const key = process.env.GEMINI_API_KEY;
-  if (!key) throw new Error('No hay GEMINI_API_KEY configurada');
-
-  const { start, label: periodoLabel } = getDateRange(period);
-  const filteredSales    = sales.filter(s => getSaleDate(s) >= start);
-  const filteredExpenses = expenses.filter(e => getExpenseDate(e) >= start);
-
-  const metrics = {
-    ingresos:      filteredSales.reduce((s, x) => s + x.total, 0),
-    gastos:        filteredExpenses.reduce((s, x) => s + x.amount, 0),
-    utilidad:      0,
-    transacciones: filteredSales.length + filteredExpenses.length,
-  };
-  metrics.utilidad = metrics.ingresos - metrics.gastos;
-
-  const chartData = computeChartData(sales, expenses, start, period);
-  const pieData   = computePieData(expenses, start);
-  const bestDay   = computeBestDay(sales, start);
-
-  const client   = new GoogleGenAI({ apiKey: key });
-  const prompt   = buildPrompt(metrics, pieData, bestDay, periodoLabel, userName);
-  const contents = [{ role: 'user', parts: [{ text: prompt }] }];
-
-  for (const model of ['gemini-2.5-flash', 'gemini-2.0-flash']) {
-    try {
-      const response = await client.models.generateContent({ model, contents, config: AI_CONFIG } as any);
-      const ai = JSON.parse(response.text ?? '{}');
-      return {
-        periodoLabel,
-        metrics,
-        chartData,
-        pieData,
-        bestDay,
-        descripcion:     ai.descripcion     ?? '',
-        insights:        ai.insights        ?? [],
-        recomendaciones: ai.recomendaciones ?? [],
-        conclusion:      ai.conclusion      ?? '',
-      };
-    } catch (err: any) {
-      console.warn(`[Report] ${model} fallo:`, err?.message ?? err);
-    }
-  }
-  throw new Error('No se pudo generar el reporte. Intenta de nuevo.');
-}
