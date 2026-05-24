@@ -21,10 +21,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       body: JSON.stringify({
         id: secretId,
         password: secretPassword,
-        scopes: 'read_institutions,create_links,delete_links,read_accounts,read_transactions,read_owners',
+        scopes: 'read_institutions,read_accounts,read_transactions,read_owners',
       }),
     });
     const data = await r.json();
+    if (!r.ok) {
+      const msg = data?.detail ?? data?.non_field_errors?.[0]
+        ?? data?.message ?? JSON.stringify(data);
+      return res.status(r.status).json({ error: `Belvo ${r.status}: ${msg}` });
+    }
     return res.status(r.status).json(data);
   } catch (err: any) {
     return res.status(500).json({ error: err.message });

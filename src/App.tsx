@@ -201,6 +201,7 @@ export default function App() {
               identityVerified={profile?.identityVerified}
               verifiedCedula={profile?.cedulaExtracted}
               verifiedName={profile?.cedulaName}
+              onExit={() => setActiveTab('inicio')}
             />
           </motion.div>
         )}
