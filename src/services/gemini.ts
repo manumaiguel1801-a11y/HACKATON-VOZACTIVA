@@ -199,7 +199,7 @@ data schema:
 }`;
 
 // Modelos en orden de prioridad — el primero falla → prueba el siguiente
-const MODELS = ['gemini-2.5-flash', 'gemini-2.0-flash'];
+const MODELS = ['gemini-2.0-flash', 'gemini-1.5-flash'];
 
 function getClient(): GoogleGenAI {
   const key = process.env.GEMINI_API_KEY;

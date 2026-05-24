@@ -1,15 +1,17 @@
 import React, { useState, useRef, useEffect } from 'react';
 import {
   ShieldCheck, FileText, Upload, CheckCircle2,
-  Lock, X,
+  Lock, X, Download,
   FileCheck, AlertCircle, Sparkles, Loader2,
   TrendingUp, TrendingDown, ChevronDown, ChevronUp, Smartphone,
   Info, LogOut,
 } from 'lucide-react';
-import { collection, addDoc, getDocs, deleteDoc, doc, serverTimestamp, query, orderBy, getDoc } from 'firebase/firestore';
+import { collection, addDoc, getDocs, deleteDoc, doc, serverTimestamp, query, orderBy } from 'firebase/firestore';
 import { db } from '../firebase';
 import { cn } from '../lib/utils';
 import { analyzeExtracto, ExtractoAnalysis } from '../services/extractoService';
+import { analyzeCreditFromExtracto, CreditAnalysis } from '../agentes/creditoAgente';
+import { generateExtractoCreditPDF } from '../services/pdfService';
 
 interface Props {
   isDarkMode: boolean;
@@ -25,7 +27,9 @@ interface UploadedFile {
   name: string;
   size: string;
   status: 'analizando' | 'analizado' | 'error';
+  stepMsg?: string;
   analysis?: ExtractoAnalysis;
+  creditAnalysis?: CreditAnalysis;
   errorMsg?: string;
 }
 
@@ -140,24 +144,65 @@ function ScoreBar({ value, color }: { value: number; color: string }) {
   );
 }
 
-function AnalysisCard({ analysis, isDarkMode, text, muted }: {
+function scoreColor(s: number) {
+  if (s >= 750) return 'text-green-600';
+  if (s >= 600) return 'text-[#B8860B]';
+  if (s >= 450) return 'text-orange-500';
+  return 'text-red-500';
+}
+function scoreLabel(s: number) {
+  if (s >= 750) return 'Excelente';
+  if (s >= 650) return 'Muy bueno';
+  if (s >= 550) return 'Bueno';
+  if (s >= 450) return 'Aceptable';
+  if (s >= 350) return 'Regular';
+  return 'Bajo';
+}
+
+function AnalysisCard({ analysis, creditAnalysis, isDarkMode, text, muted, cedula, userName }: {
   analysis: ExtractoAnalysis;
+  creditAnalysis?: CreditAnalysis;
   isDarkMode: boolean;
   text: string;
   muted: string;
+  cedula: string;
+  userName?: string;
 }) {
   const [showTx, setShowTx] = useState(false);
   const label = ENTIDAD_LABEL[analysis.entidad] ?? 'Extracto';
 
+  const downloadPDF = () => {
+    if (!creditAnalysis) return;
+    const { blob, filename } = generateExtractoCreditPDF(
+      { name: userName ?? 'Usuario', cedula },
+      creditAnalysis,
+    );
+    const url = URL.createObjectURL(blob);
+    const a   = document.createElement('a');
+    a.href = url; a.download = filename; a.click();
+    URL.revokeObjectURL(url);
+  };
+
   return (
     <div className={cn('rounded-xl p-4 space-y-4', isDarkMode ? 'bg-[#0D0D0D]' : 'bg-[#FDFBF0]')}>
       {/* Header */}
-      <div className="flex items-center gap-2">
-        <CheckCircle2 className="w-4 h-4 text-green-500 flex-shrink-0" />
-        <div>
-          <p className="text-xs font-black uppercase tracking-widest text-[#B8860B]">{label}</p>
-          <p className={cn('text-sm font-black', text)}>Análisis completado</p>
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <CheckCircle2 className="w-4 h-4 text-green-500 flex-shrink-0" />
+          <div>
+            <p className="text-xs font-black uppercase tracking-widest text-[#B8860B]">{label}</p>
+            <p className={cn('text-sm font-black', text)}>Análisis completado</p>
+          </div>
         </div>
+        {creditAnalysis && (
+          <button
+            onClick={downloadPDF}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-gradient-to-r from-[#B8860B] to-[#FFD700] text-black text-xs font-black active:scale-95 transition-all shadow-sm"
+          >
+            <Download className="w-3.5 h-3.5" />
+            Pasaporte
+          </button>
+        )}
       </div>
 
       {analysis.passwordUnlocked && (
@@ -167,8 +212,62 @@ function AnalysisCard({ analysis, isDarkMode, text, muted }: {
         </div>
       )}
 
+      {/* Score crediticio */}
+      {creditAnalysis && (
+        <div className={cn('rounded-xl p-3 space-y-3', isDarkMode ? 'bg-white/5' : 'bg-white')}>
+          {/* Score principal */}
+          <div className="flex items-center justify-between">
+            <div>
+              <p className={cn('text-[10px] font-black uppercase tracking-widest', muted)}>Score crediticio</p>
+              <div className="flex items-baseline gap-1 mt-0.5">
+                <span className={cn('text-3xl font-black', scoreColor(creditAnalysis.scores.scoreFinal))}>
+                  {creditAnalysis.scores.scoreFinal}
+                </span>
+                <span className={cn('text-xs', muted)}>/950</span>
+              </div>
+            </div>
+            <span className={cn('text-xs font-black px-2.5 py-1 rounded-full',
+              creditAnalysis.scores.scoreFinal >= 650 ? 'bg-green-500/15 text-green-600'
+              : creditAnalysis.scores.scoreFinal >= 450 ? 'bg-[#B8860B]/15 text-[#B8860B]'
+              : 'bg-red-500/15 text-red-500',
+            )}>
+              {scoreLabel(creditAnalysis.scores.scoreFinal)}
+            </span>
+          </div>
+          {/* Barra del score */}
+          <div className={cn('w-full h-2 rounded-full overflow-hidden', isDarkMode ? 'bg-white/10' : 'bg-black/8')}>
+            <div
+              className={cn('h-full rounded-full transition-all duration-700',
+                creditAnalysis.scores.scoreFinal >= 650 ? 'bg-green-500'
+                : creditAnalysis.scores.scoreFinal >= 450 ? 'bg-gradient-to-r from-[#B8860B] to-[#FFD700]'
+                : 'bg-red-500',
+              )}
+              style={{ width: `${((creditAnalysis.scores.scoreFinal - 150) / 800) * 100}%` }}
+            />
+          </div>
+          {/* Factores */}
+          <div className="space-y-1.5 pt-1">
+            {[
+              { label: 'Consistencia ingresos', value: creditAnalysis.scores.consistenciaIngresos, max: 30 },
+              { label: 'Capacidad de pago',      value: creditAnalysis.scores.capacidadPago,        max: 25 },
+              { label: 'Calidad (QR/digital)',   value: creditAnalysis.scores.calidadIngresos,      max: 20 },
+              { label: 'Volumen de actividad',   value: creditAnalysis.scores.volumenActividad,     max: 15 },
+              { label: 'Cobertura extracto',     value: creditAnalysis.scores.coberturaExtracto,    max: 10 },
+            ].map(f => (
+              <div key={f.label}>
+                <div className="flex justify-between items-center mb-0.5">
+                  <span className={cn('text-[10px]', muted)}>{f.label}</span>
+                  <span className={cn('text-[10px] font-black', muted)}>{f.value}/{f.max}</span>
+                </div>
+                <ScoreBar value={Math.round((f.value / f.max) * 100)} color={f.value / f.max >= 0.6 ? 'bg-[#B8860B]' : f.value / f.max >= 0.3 ? 'bg-yellow-500' : 'bg-red-400'} />
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Ingresos vs Gastos */}
-      <div className={cn('rounded-xl p-3 space-y-2.5', isDarkMode ? 'bg-white/5' : 'bg-white')}>
+      <div className={cn('rounded-xl p-3 space-y-2', isDarkMode ? 'bg-white/5' : 'bg-white')}>
         <div className="flex justify-between items-center">
           <span className="text-xs font-bold text-green-600 flex items-center gap-1">
             <TrendingUp className="w-3 h-3" />Ingresos totales
@@ -176,27 +275,24 @@ function AnalysisCard({ analysis, isDarkMode, text, muted }: {
           <span className="text-sm font-black text-green-600">{formatCOP(analysis.totalIngresos)}</span>
         </div>
         <div className="flex justify-between items-center">
-          <span className={cn('text-xs font-bold flex items-center gap-1', 'text-red-500')}>
+          <span className="text-xs font-bold text-red-500 flex items-center gap-1">
             <TrendingDown className="w-3 h-3" />Gastos / retiros
           </span>
           <span className="text-sm font-black text-red-500">{formatCOP(analysis.totalGastos)}</span>
         </div>
-        {analysis.totalIngresos > 0 && (
-          <div className="pt-1">
-            <div className="flex justify-between items-center mb-1">
-              <span className={cn('text-[10px]', muted)}>Cobros QR / ventas directas</span>
-              <span className={cn('text-[10px] font-black', muted)}>{analysis.porcentajeVentas}%</span>
-            </div>
-            <ScoreBar value={analysis.porcentajeVentas} color="bg-[#B8860B]" />
-          </div>
-        )}
       </div>
 
-      {/* Mini análisis IA */}
-      {analysis.miniAnalisis && (
+      {/* Narrativa IA */}
+      {creditAnalysis?.narrative.resumen && (
         <div className={cn('rounded-xl p-3 flex items-start gap-2.5', isDarkMode ? 'bg-white/5' : 'bg-white')}>
           <Sparkles className="w-3.5 h-3.5 text-[#B8860B] flex-shrink-0 mt-0.5" />
-          <p className={cn('text-xs leading-relaxed', text)}>{analysis.miniAnalisis}</p>
+          <p className={cn('text-xs leading-relaxed', text)}>{creditAnalysis.narrative.resumen}</p>
+        </div>
+      )}
+      {creditAnalysis?.narrative.conclusion && (
+        <div className={cn('rounded-xl p-3 flex items-start gap-2', isDarkMode ? 'bg-[#B8860B]/10' : 'bg-[#FFF8DC]')}>
+          <span className="text-sm flex-shrink-0">💡</span>
+          <p className={cn('text-xs font-bold leading-snug', isDarkMode ? 'text-white/80' : 'text-[#5b3d00]')}>{creditAnalysis.narrative.conclusion}</p>
         </div>
       )}
 
@@ -241,55 +337,45 @@ export const AvalDashboard = ({ isDarkMode, cedula, userName, userId, onBack }: 
   const [showTips, setShowTips]           = useState(false);
   const [showCloseModal, setShowCloseModal] = useState(false);
   const [openBank, setOpenBank]           = useState<string | null>(null);
-  const [daysInApp, setDaysInApp]         = useState<number | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const REQUIRED_DAYS = 30;
-  const canUpload = daysInApp === null || daysInApp >= REQUIRED_DAYS;
-  const daysLeft  = daysInApp !== null ? Math.max(0, REQUIRED_DAYS - daysInApp) : null;
-
-  // Cargar análisis guardados y días en la app al montar
+  // Cargar análisis guardados al montar
   useEffect(() => {
     const load = async () => {
-      try {
-        // Calcular días en la app desde createdAt del usuario
-        const userDoc = await getDoc(doc(db, 'users', userId));
-        if (userDoc.exists()) {
-          const raw = userDoc.data().createdAt;
-          const createdDate: Date = raw?.toDate ? raw.toDate() : new Date(raw);
-          const days = Math.floor((Date.now() - createdDate.getTime()) / 86_400_000);
-          setDaysInApp(days);
-        } else {
-          setDaysInApp(0);
-        }
-      } catch { setDaysInApp(0); }
-
       try {
         const col = collection(db, 'users', userId, 'extractos');
         const snap = await getDocs(query(col, orderBy('analyzedAt', 'desc')));
         const loaded: UploadedFile[] = snap.docs.map(d => {
           const data = d.data();
+          const creditData = data.creditScores ? {
+            scores:        data.creditScores,
+            narrative:     data.creditNarrative ?? { resumen:'', insights:[], recomendaciones:[], conclusion:'' },
+            totalIngresos: data.creditTotalIngresos ?? 0,
+            totalGastos:   data.creditTotalGastos   ?? 0,
+            margenPct:     data.creditMargenPct      ?? 0,
+            entidad:       data.entidad              ?? 'otro',
+          } as CreditAnalysis : undefined;
           return {
-            id: d.id,
-            docId: d.id,
+            id: d.id, docId: d.id,
             name: data.fileName ?? 'extracto.pdf',
             size: data.fileSize ?? '',
             status: 'analizado' as const,
             analysis: {
-              entidad:               data.entidad               ?? 'otro',
-              totalIngresos:         data.totalIngresos         ?? 0,
-              totalGastos:           data.totalGastos           ?? 0,
-              ingresosVentas:        data.ingresosVentas        ?? 0,
-              ingresosTransferencias:data.ingresosTransferencias?? 0,
-              porcentajeVentas:      data.porcentajeVentas      ?? 0,
-              transactions:          data.transactions          ?? [],
-              miniAnalisis:          data.miniAnalisis          ?? '',
-              passwordUnlocked:      data.passwordUnlocked      ?? false,
+              entidad:                data.entidad                ?? 'otro',
+              totalIngresos:          data.totalIngresos          ?? 0,
+              totalGastos:            data.totalGastos            ?? 0,
+              ingresosVentas:         data.ingresosVentas         ?? 0,
+              ingresosTransferencias: data.ingresosTransferencias ?? 0,
+              porcentajeVentas:       data.porcentajeVentas       ?? 0,
+              transactions:           data.transactions           ?? [],
+              miniAnalisis:           data.miniAnalisis           ?? '',
+              passwordUnlocked:       data.passwordUnlocked       ?? false,
             },
+            creditAnalysis: creditData,
           };
         });
         setUploadedFiles(loaded);
-      } catch { /* silencioso si no hay datos */ }
+      } catch { /* silencioso */ }
     };
     load();
   }, [userId]);
@@ -301,30 +387,53 @@ export const AvalDashboard = ({ isDarkMode, cedula, userName, userId, onBack }: 
   const maskedCedula = cedula.length > 4 ? '••••••' + cedula.slice(-4) : cedula;
   const completedAnalyses = uploadedFiles.filter(f => f.status === 'analizado' && f.analysis);
 
+  const setStep = (id: string, msg: string) =>
+    setUploadedFiles(prev => prev.map(f => f.id === id ? { ...f, stepMsg: msg } : f));
+
   const processFile = async (file: File, id: string) => {
     try {
+      // Paso 1: extraer transacciones del PDF con Gemini
+      setStep(id, 'Leyendo extracto con IA...');
       const analysis = await analyzeExtracto(file, cedula);
-      // Guardar en Firestore
+
+      // Paso 2: agente de crédito calcula scores y narrativa
+      setStep(id, 'Evaluando capacidad crediticia...');
+      const creditAnalysis = await analyzeCreditFromExtracto(
+        analysis.transactions,
+        analysis.entidad,
+        userName,
+        (step) => setStep(id, step),
+      );
+
+      // Paso 3: guardar en Firestore
       const col = collection(db, 'users', userId, 'extractos');
       const docRef = await addDoc(col, {
-        fileName:              file.name,
-        fileSize:              formatBytes(file.size),
-        analyzedAt:            serverTimestamp(),
-        entidad:               analysis.entidad,
-        totalIngresos:         analysis.totalIngresos,
-        totalGastos:           analysis.totalGastos,
-        ingresosVentas:        analysis.ingresosVentas,
-        ingresosTransferencias:analysis.ingresosTransferencias,
-        porcentajeVentas:      analysis.porcentajeVentas,
-        transactions:          analysis.transactions,
-        miniAnalisis:          analysis.miniAnalisis,
-        passwordUnlocked:      analysis.passwordUnlocked,
+        fileName:               file.name,
+        fileSize:               formatBytes(file.size),
+        analyzedAt:             serverTimestamp(),
+        entidad:                analysis.entidad,
+        totalIngresos:          analysis.totalIngresos,
+        totalGastos:            analysis.totalGastos,
+        ingresosVentas:         analysis.ingresosVentas,
+        ingresosTransferencias: analysis.ingresosTransferencias,
+        porcentajeVentas:       analysis.porcentajeVentas,
+        transactions:           analysis.transactions,
+        miniAnalisis:           analysis.miniAnalisis,
+        passwordUnlocked:       analysis.passwordUnlocked,
+        creditScores:           creditAnalysis.scores,
+        creditNarrative:        creditAnalysis.narrative,
+        creditTotalIngresos:    creditAnalysis.totalIngresos,
+        creditTotalGastos:      creditAnalysis.totalGastos,
+        creditMargenPct:        creditAnalysis.margenPct,
       });
+
       setUploadedFiles(prev => prev.map(f =>
-        f.id === id ? { ...f, status: 'analizado', analysis, docId: docRef.id } : f,
+        f.id === id ? { ...f, status: 'analizado', analysis, creditAnalysis, docId: docRef.id, stepMsg: '' } : f,
       ));
     } catch (err: any) {
-      setUploadedFiles(prev => prev.map(f => f.id === id ? { ...f, status: 'error', errorMsg: err.message } : f));
+      setUploadedFiles(prev => prev.map(f =>
+        f.id === id ? { ...f, status: 'error', errorMsg: err.message, stepMsg: '' } : f,
+      ));
     }
   };
 
@@ -530,63 +639,37 @@ export const AvalDashboard = ({ isDarkMode, cedula, userName, userId, onBack }: 
           </div>
         )}
 
-        {/* Drop zone — bloqueado si no lleva 30 días */}
-        {!canUpload ? (
-          <div className={cn('rounded-xl p-5 flex flex-col items-center gap-3 text-center border-2 border-dashed', isDarkMode ? 'border-white/10 bg-white/3' : 'border-black/10 bg-black/2')}>
-            <div className={cn('w-12 h-12 rounded-2xl flex items-center justify-center', isDarkMode ? 'bg-white/8' : 'bg-gray-100')}>
-              <Lock className={cn('w-6 h-6', muted)} />
-            </div>
-            <div>
-              <p className={cn('text-sm font-black', text)}>Disponible en {daysLeft} día{daysLeft !== 1 ? 's' : ''}</p>
-              <p className={cn('text-xs mt-1 leading-snug', muted)}>
-                Necesitas 30 días de historial en Voz Activa para analizar tu extracto.
-              </p>
-            </div>
-            <div className="w-full space-y-1.5">
-              <div className="flex justify-between text-[10px] font-bold">
-                <span className={muted}>Día {daysInApp ?? 0} de 30</span>
-                <span className="text-[#B8860B]">{Math.round(((daysInApp ?? 0) / REQUIRED_DAYS) * 100)}%</span>
-              </div>
-              <div className={cn('w-full h-2 rounded-full overflow-hidden', isDarkMode ? 'bg-white/10' : 'bg-black/8')}>
-                <div
-                  className="h-full rounded-full bg-gradient-to-r from-[#B8860B] to-[#FFD700] transition-all duration-700"
-                  style={{ width: `${Math.min(((daysInApp ?? 0) / REQUIRED_DAYS) * 100, 100)}%` }}
-                />
-              </div>
-            </div>
+        {/* Drop zone */}
+        <div
+          onDragOver={e => { e.preventDefault(); setIsDragging(true); }}
+          onDragLeave={() => setIsDragging(false)}
+          onDrop={e => { e.preventDefault(); setIsDragging(false); handleFiles(e.dataTransfer.files); }}
+          onClick={() => fileInputRef.current?.click()}
+          className={cn(
+            'border-2 border-dashed rounded-xl p-6 flex flex-col items-center gap-2.5 cursor-pointer transition-all',
+            isDragging
+              ? 'border-[#B8860B] bg-[#B8860B]/10'
+              : isDarkMode
+                ? 'border-white/10 hover:border-[#B8860B]/40 hover:bg-[#B8860B]/5'
+                : 'border-black/10 hover:border-[#B8860B]/40 hover:bg-[#FFF8DC]/50',
+          )}
+        >
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".pdf"
+            multiple
+            className="hidden"
+            onChange={e => handleFiles(e.target.files)}
+          />
+          <div className={cn('w-12 h-12 rounded-2xl flex items-center justify-center', isDarkMode ? 'bg-white/8' : 'bg-[#FFF8DC]')}>
+            <Upload className="w-6 h-6 text-[#B8860B]" />
           </div>
-        ) : (
-          <div
-            onDragOver={e => { e.preventDefault(); setIsDragging(true); }}
-            onDragLeave={() => setIsDragging(false)}
-            onDrop={e => { e.preventDefault(); setIsDragging(false); handleFiles(e.dataTransfer.files); }}
-            onClick={() => fileInputRef.current?.click()}
-            className={cn(
-              'border-2 border-dashed rounded-xl p-6 flex flex-col items-center gap-2.5 cursor-pointer transition-all',
-              isDragging
-                ? 'border-[#B8860B] bg-[#B8860B]/10'
-                : isDarkMode
-                  ? 'border-white/10 hover:border-[#B8860B]/40 hover:bg-[#B8860B]/5'
-                  : 'border-black/10 hover:border-[#B8860B]/40 hover:bg-[#FFF8DC]/50',
-            )}
-          >
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept=".pdf"
-              multiple
-              className="hidden"
-              onChange={e => handleFiles(e.target.files)}
-            />
-            <div className={cn('w-12 h-12 rounded-2xl flex items-center justify-center', isDarkMode ? 'bg-white/8' : 'bg-[#FFF8DC]')}>
-              <Upload className="w-6 h-6 text-[#B8860B]" />
-            </div>
-            <div className="text-center">
-              <p className={cn('text-sm font-black', text)}>Toca para subir o arrastra aquí</p>
-              <p className={cn('text-xs mt-0.5', muted)}>Solo archivos PDF</p>
-            </div>
+          <div className="text-center">
+            <p className={cn('text-sm font-black', text)}>Toca para subir o arrastra aquí</p>
+            <p className={cn('text-xs mt-0.5', muted)}>Solo archivos PDF</p>
           </div>
-        )}
+        </div>
 
         {/* File list */}
         {uploadedFiles.length > 0 && (

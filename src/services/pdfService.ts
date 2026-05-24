@@ -502,3 +502,296 @@ export async function generatePassportPDF(
   const filename = `pasaporte-vozactiva-${safeCedula}-${dateStr}.pdf`;
   return { blob: doc.output('blob') as Blob, filename };
 }
+
+// ─── Pasaporte crediticio generado desde extracto bancario ────────────────────
+import { CreditAnalysis } from '../agentes/creditoAgente';
+
+const ENTIDAD_LABEL_PDF: Record<string, string> = {
+  nequi: 'Nequi', daviplata: 'Daviplata',
+  davivienda: 'Davivienda', bancolombia: 'Bancolombia',
+};
+
+export function generateExtractoCreditPDF(
+  profile: { name: string; cedula: string; phone?: string },
+  credit: CreditAnalysis,
+): { blob: Blob; filename: string } {
+  const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+  const W = 210; const M = 14; const CW = W - M * 2;
+  const now = new Date();
+
+  const { scores, narrative, totalIngresos, totalGastos, margenPct, entidad } = credit;
+  const entidadLabel = ENTIDAD_LABEL_PDF[entidad] ?? 'Extracto bancario';
+  const nombre   = profile.name   || 'Usuario Voz-Activa';
+  const cedula   = profile.cedula || '—';
+  const telefono = profile.phone  || '—';
+  const sc = scoreColor(scores.scoreFinal);
+  const validUntil = formatDate(addMonths(now, 3));
+
+  let y = 0;
+
+  // ── Franja dorada izquierda ───────────────────────────────────────────────
+  rgb(doc, 'fill', C.gold);
+  doc.rect(0, 0, 5, 297, 'F');
+
+  // ── Header ────────────────────────────────────────────────────────────────
+  rgb(doc, 'fill', C.dark);
+  doc.rect(5, 0, W - 5, 38, 'F');
+
+  rgb(doc, 'text', C.goldLight);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(20);
+  doc.text('VOZ·ACTIVA', M + 2, 14);
+
+  rgb(doc, 'text', [180, 180, 175]);
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(7.5);
+  doc.text('SCORING CREDITICIO ALTERNATIVO PARA MICRONEGOCIOS', M + 2, 21);
+
+  rgb(doc, 'fill', C.gold);
+  doc.roundedRect(M + 2, 25, 80, 8, 1.5, 1.5, 'F');
+  rgb(doc, 'text', C.dark);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(7);
+  doc.text(`ANÁLISIS CREDITICIO POR EXTRACTO — ${entidadLabel.toUpperCase()}`, M + 2 + 40, 30.2, { align: 'center' });
+
+  rgb(doc, 'text', [180, 180, 175]);
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(7);
+  doc.text(`Extracto: ${entidadLabel}`, W - M, 14, { align: 'right' });
+  doc.text('Análisis por IA', W - M, 20, { align: 'right' });
+  y = 48;
+
+  // ── Titular ───────────────────────────────────────────────────────────────
+  sectionTitle(doc, 'Datos del Titular', M, y, CW);
+  y += 7;
+
+  rgb(doc, 'text', C.dark);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(13);
+  doc.text(nombre, M, y);
+  y += 6;
+
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(8.5);
+  rgb(doc, 'text', C.gray);
+  doc.text(`Cédula de ciudadanía: ${cedula}`, M, y);
+  y += 5;
+  doc.text(`Teléfono: ${telefono}`, M, y);
+  y += 5;
+
+  doc.setFontSize(7.5);
+  doc.text('Fecha de emisión:', W - M - 55, y - 10);
+  rgb(doc, 'text', C.dark);
+  doc.setFont('helvetica', 'bold');
+  doc.text(formatDate(now), W - M - 55, y - 5);
+  doc.setFont('helvetica', 'normal');
+  rgb(doc, 'text', C.gray);
+  doc.text('Válido hasta:', W - M - 55, y);
+  rgb(doc, 'text', C.dark);
+  doc.setFont('helvetica', 'bold');
+  doc.text(validUntil, W - M - 55, y + 5);
+  y += 12;
+
+  // ── Score hero ────────────────────────────────────────────────────────────
+  sectionTitle(doc, 'Score de Viabilidad Crediticia', M, y, CW);
+  y += 7;
+
+  rgb(doc, 'fill', C.cream);
+  rgb(doc, 'draw', C.gold);
+  doc.setLineWidth(0.4);
+  doc.roundedRect(M, y, CW, 38, 3, 3, 'FD');
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(42);
+  rgb(doc, 'text', sc);
+  doc.text(String(scores.scoreFinal), M + CW * 0.28, y + 17, { align: 'center' });
+
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(11);
+  rgb(doc, 'text', C.gray);
+  doc.text('/ 950', M + CW * 0.28 + 16, y + 11);
+
+  const lbl = getScoreLabel(scores.scoreFinal).toUpperCase();
+  rgb(doc, 'fill', sc);
+  doc.roundedRect(M + CW * 0.28 - 16, y + 19, 32, 7, 2, 2, 'F');
+  rgb(doc, 'text', C.white);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(7.5);
+  doc.text(lbl, M + CW * 0.28, y + 23.8, { align: 'center' });
+
+  const barX = M + CW * 0.45; const barW = CW * 0.52;
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(7);
+  rgb(doc, 'text', C.gray);
+  doc.text('Posición en la escala:', barX, y + 6);
+  scoreBar(doc, scores.scoreFinal, barX, y + 9, barW);
+  y += 46;
+
+  // ── Resumen financiero del extracto ──────────────────────────────────────
+  sectionTitle(doc, `Resumen Financiero — Extracto ${entidadLabel}`, M, y, CW);
+  y += 7;
+
+  const margenCOP = totalIngresos - totalGastos;
+  const metrics = [
+    { label: 'Ingresos totales',  value: formatCOP(totalIngresos) },
+    { label: 'Gastos / retiros',  value: formatCOP(totalGastos) },
+    { label: 'Margen neto',       value: `${margenPct}%` },
+    { label: 'Superávit',         value: formatCOP(Math.max(0, margenCOP)) },
+  ];
+
+  const halfCW = (CW - 4) / 2;
+  metrics.forEach((m, i) => {
+    const col = i % 2; const row = Math.floor(i / 2);
+    const cx = M + col * (halfCW + 4); const cy = y + row * 14;
+    rgb(doc, 'fill', col === 0 ? C.cream : [245, 242, 225]);
+    rgb(doc, 'draw', C.lightGray);
+    doc.setLineWidth(0.2);
+    doc.roundedRect(cx, cy, halfCW, 12, 1.5, 1.5, 'FD');
+    rgb(doc, 'text', C.gray);
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(7);
+    doc.text(m.label, cx + halfCW / 2, cy + 4.5, { align: 'center' });
+    rgb(doc, 'text', C.dark);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(10.5);
+    doc.text(m.value, cx + halfCW / 2, cy + 10, { align: 'center' });
+  });
+  y += 30;
+
+  // ── Factores crediticios ──────────────────────────────────────────────────
+  sectionTitle(doc, 'Análisis de Factores Crediticios', M, y, CW);
+  y += 7;
+
+  const factors = [
+    { label: 'Consistencia de ingresos',          value: scores.consistenciaIngresos, max: 30 },
+    { label: 'Capacidad de pago',                  value: scores.capacidadPago,        max: 25 },
+    { label: 'Calidad de ingresos (QR / digital)', value: scores.calidadIngresos,      max: 20 },
+    { label: 'Volumen de actividad financiera',    value: scores.volumenActividad,     max: 15 },
+    { label: 'Cobertura del extracto analizado',   value: scores.coberturaExtracto,    max: 10 },
+  ];
+
+  factors.forEach((f, i) => {
+    const pct = f.value / f.max;
+    const ql = qualLabel(pct);
+    const rowBg: [number,number,number] = i % 2 === 0 ? C.cream : [245, 242, 225];
+    rgb(doc, 'fill', rowBg);
+    doc.rect(M, y, CW, 9, 'F');
+    rgb(doc, 'text', C.dark);
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(8);
+    doc.text(f.label, M + 3, y + 6);
+    const bx = M + 105; const bw = 50; const by = y + 3;
+    rgb(doc, 'fill', C.lightGray);
+    doc.roundedRect(bx, by, bw, 3, 1, 1, 'F');
+    rgb(doc, 'fill', ql.color);
+    if (pct > 0) doc.roundedRect(bx, by, bw * pct, 3, 1, 1, 'F');
+    rgb(doc, 'fill', ql.color);
+    doc.roundedRect(W - M - 23, y + 1.5, 23, 6, 1.5, 1.5, 'F');
+    rgb(doc, 'text', C.white);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(6.5);
+    doc.text(ql.text, W - M - 11.5, y + 5.7, { align: 'center' });
+    y += 9;
+  });
+  y += 6;
+
+  // ── Análisis de la IA ─────────────────────────────────────────────────────
+  if (narrative.resumen || narrative.insights.length > 0) {
+    sectionTitle(doc, 'Análisis de Inteligencia Artificial', M, y, CW);
+    y += 7;
+
+    if (narrative.resumen) {
+      const lines = doc.splitTextToSize(narrative.resumen, CW - 4);
+      rgb(doc, 'text', C.gray);
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(8.5);
+      doc.text(lines, M + 2, y);
+      y += lines.length * 4.5 + 4;
+    }
+
+    narrative.insights.slice(0, 3).forEach(ins => {
+      if (y > 255) return;
+      rgb(doc, 'fill', C.gold);
+      doc.circle(M + 3, y + 3, 1.4, 'F');
+      rgb(doc, 'text', C.dark);
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(8.5);
+      doc.text(ins.titulo, M + 7, y + 3.8);
+      const tlines = doc.splitTextToSize(ins.texto, CW - 8);
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(8);
+      rgb(doc, 'text', C.gray);
+      doc.text(tlines, M + 7, y + 8.5);
+      y += 8 + tlines.length * 4.5 + 3;
+    });
+  }
+
+  // ── Conclusión ────────────────────────────────────────────────────────────
+  if (narrative.conclusion && y < 255) {
+    y += 2;
+    rgb(doc, 'fill', [255, 250, 225]);
+    doc.rect(M, y, CW, 16, 'F');
+    rgb(doc, 'fill', C.gold);
+    doc.rect(M, y, 3, 16, 'F');
+    rgb(doc, 'text', C.gold);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(8);
+    doc.text('CONCLUSIÓN', M + 7, y + 6);
+    const cl = doc.splitTextToSize(`"${narrative.conclusion}"`, CW - 10);
+    rgb(doc, 'text', C.dark);
+    doc.setFont('helvetica', 'italic');
+    doc.setFontSize(8.5);
+    doc.text(cl, M + 7, y + 12);
+    y += 20;
+  }
+
+  // ── Certificación ─────────────────────────────────────────────────────────
+  if (y < 252) {
+    sectionTitle(doc, 'Certificación', M, y, CW);
+    y += 7;
+    const certH = 22;
+    rgb(doc, 'fill', C.cream);
+    rgb(doc, 'draw', C.gold);
+    doc.setLineWidth(0.4);
+    doc.roundedRect(M, y, CW, certH, 2, 2, 'FD');
+    rgb(doc, 'fill', C.gold);
+    doc.roundedRect(M, y, 3, certH, 1, 1, 'F');
+    const cx2 = M + CW / 2;
+    rgb(doc, 'text', C.dark);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(8);
+    doc.text('Voz-Activa certifica que:', cx2, y + 6, { align: 'center' });
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(7.5);
+    rgb(doc, 'text', C.gray);
+    const certText = `El análisis fue generado automáticamente a partir del extracto bancario de ${entidadLabel} del titular mediante inteligencia artificial. Los scores reflejan consistencia de ingresos, capacidad de pago y calidad de las fuentes. Este documento puede presentarse ante microfinancieras como indicador alternativo de capacidad crediticia.`;
+    const certLines = doc.splitTextToSize(certText, CW - 10);
+    certLines.forEach((line: string, i: number) => doc.text(line, cx2, y + 12 + i * 4, { align: 'center' }));
+  }
+
+  // ── Footer ────────────────────────────────────────────────────────────────
+  rgb(doc, 'fill', C.dark);
+  doc.rect(5, 273, W - 5, 24, 'F');
+  rgb(doc, 'text', C.goldLight);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(8);
+  doc.text('VOZ·ACTIVA', M, 280);
+  rgb(doc, 'text', [150, 150, 145]);
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(6.5);
+  doc.text('Scoring Crediticio Alternativo para Micronegocios de Colombia', M, 286);
+  doc.text('Generado por IA a partir de extracto bancario. No constituye garantía financiera.', M, 292);
+  rgb(doc, 'text', C.goldLight);
+  doc.setFontSize(7);
+  doc.text('voz-activa-snowy.vercel.app', W - M, 280, { align: 'right' });
+  rgb(doc, 'text', [150, 150, 145]);
+  doc.setFontSize(6.5);
+  doc.text(formatDate(now), W - M, 286, { align: 'right' });
+
+  const safeCedula = cedula.replace(/\D/g, '');
+  const dateStr = now.toISOString().slice(0, 10);
+  return {
+    blob: doc.output('blob') as Blob,
+    filename: `credito-extracto-vozactiva-${safeCedula}-${dateStr}.pdf`,
+  };
+}

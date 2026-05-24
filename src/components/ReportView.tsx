@@ -17,6 +17,7 @@ interface Props {
   isDarkMode: boolean;
   sales: Sale[];
   expenses: Expense[];
+  debts: Debt[];
   userId: string;
   userName?: string;
 }
@@ -344,7 +345,7 @@ function exportToPDF(
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────
-export const ReportView: React.FC<Props> = ({ isDarkMode, sales, expenses, userName }) => {
+export const ReportView: React.FC<Props> = ({ isDarkMode, sales, expenses, debts, userName }) => {
   const [period, setPeriod]           = useState<ReportPeriod>('7d');
   const [loading, setLoading]         = useState(false);
   const [agentStep, setAgentStep]     = useState<string>('');
@@ -390,7 +391,7 @@ export const ReportView: React.FC<Props> = ({ isDarkMode, sales, expenses, userN
     setGenerated(false);
     try {
       const { sales: fS, expenses: fE } = filterByPeriod(sales, expenses, period);
-      const report = await generateFinancialReport(sales, expenses, period, userName, setAgentStep);
+      const report = await generateFinancialReport(sales, expenses, debts, period, userName, setAgentStep);
       exportToPDF(report, fS, fE, userName, period);
       setGenerated(true);
       saveLastReport(period);

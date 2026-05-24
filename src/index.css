@@ -18,3 +18,53 @@
 .animate-shimmer {
   animation: shimmer 2s infinite linear;
 }
+
+/*
+ * Belvo Connect Widget — prevent Tailwind v4 preflight from breaking
+ * the widget's injected DOM elements (links, buttons, inputs, iframe).
+ */
+body > div:not(#root),
+body > div:not(#root) *,
+body > div:not(#root) *::before,
+body > div:not(#root) *::after {
+  box-sizing: revert;
+  border-width: revert;
+  border-style: revert;
+  border-color: revert;
+}
+
+body > div:not(#root) a {
+  color: revert;
+  text-decoration: revert;
+}
+
+body > div:not(#root) button,
+body > div:not(#root) select,
+body > div:not(#root) input,
+body > div:not(#root) textarea {
+  appearance: revert;
+  font: revert;
+  color: revert;
+  background-color: revert;
+  padding: revert;
+  border: revert;
+  cursor: revert;
+}
+
+body > div:not(#root) img,
+body > div:not(#root) video {
+  display: revert;
+  max-width: revert;
+  height: revert;
+}
+
+body > div:not(#root) svg {
+  display: revert;
+  overflow: revert;
+  vertical-align: revert;
+}
+
+body > div:not(#root) iframe {
+  border: 0;
+  display: block;
+}

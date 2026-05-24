@@ -7,7 +7,7 @@
  */
 import Anthropic from '@anthropic-ai/sdk';
 import {
-  Sale, Expense,
+  Sale, Expense, Debt,
 } from '../types';
 import {
   ReportPeriod, ParsedReport,
@@ -40,6 +40,11 @@ const TOOLS: Anthropic.Tool[] = [
     description: 'Tendencia de ventas: mejor y peor día de la semana, promedio diario y días sin actividad.',
     input_schema: { type: 'object' as const, properties: {} },
   },
+  {
+    name: 'get_debt_summary',
+    description: 'Obtiene un resumen de deudas pendientes (lo que deben al usuario vs lo que el usuario debe).',
+    input_schema: { type: 'object' as const, properties: {} },
+  },
 ];
 
 const STEP_LABELS: Record<string, string> = {
@@ -47,6 +52,7 @@ const STEP_LABELS: Record<string, string> = {
   compare_with_previous_period: 'Comparando con período anterior...',
   get_expense_breakdown:        'Analizando distribución de gastos...',
   get_sales_trend:              'Detectando tendencias de ventas...',
+  get_debt_summary:             'Analizando saldos de fiados y deudas...',
 };
 
 // ─── Implementación de cada herramienta ──────────────────────────────────────
@@ -56,6 +62,7 @@ function buildToolRunner(
   expenses: Expense[],
   fSales: Sale[],
   fExpenses: Expense[],
+  debts: Debt[],
   period: ReportPeriod,
   start: Date,
 ) {
@@ -122,6 +129,17 @@ function buildToolRunner(
       };
     }
 
+    if (name === 'get_debt_summary') {
+      const meDeben = debts.filter(d => d.type === 'me-deben' && d.status !== 'pagada');
+      const debo    = debts.filter(d => d.type === 'debo' && d.status !== 'pagada');
+      return {
+        total_me_deben: meDeben.reduce((s, x) => s + x.amount, 0),
+        total_debo:     debo.reduce((s, x) => s + x.amount, 0),
+        cant_fiados_activos: meDeben.length,
+        cant_deudas_activas: debo.length,
+      };
+    }
+
     return { error: 'Herramienta no encontrada' };
   };
 }
@@ -131,6 +149,7 @@ function buildToolRunner(
 export async function generateFinancialReport(
   sales: Sale[],
   expenses: Expense[],
+  debts: Debt[],
   period: ReportPeriod,
   userName?: string,
   onStep?: (step: string) => void,
@@ -145,7 +164,7 @@ export async function generateFinancialReport(
   const chartData = computeChartData(sales, expenses, start, period);
   const pieData   = computePieData(expenses, start);
   const bestDay   = computeBestDay(sales, start);
-  const runTool   = buildToolRunner(sales, expenses, fSales, fExpenses, period, start);
+  const runTool   = buildToolRunner(sales, expenses, fSales, fExpenses, debts, period, start);
 
   const client = new Anthropic({ apiKey, dangerouslyAllowBrowser: true });
 
@@ -180,7 +199,7 @@ REGLAS: usa cifras reales, sin markdown, sin asteriscos, texto plano, español c
   // ── Loop del agente ────────────────────────────────────────────────────────
   for (let i = 0; i < 10; i++) {
     const resp = await client.messages.create({
-      model: 'claude-haiku-4-5-20251001',
+      model: 'claude-3-5-haiku-20241022',
       max_tokens: 4096,
       system,
       tools: TOOLS,

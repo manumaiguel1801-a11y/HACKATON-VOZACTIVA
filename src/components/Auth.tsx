@@ -223,10 +223,14 @@ export const Auth = ({ isDarkMode }: AuthProps) => {
     </AnimatePresence>
 
     <div className={cn(
-      "min-h-screen flex flex-col px-6 py-12 transition-colors duration-500",
+      "min-h-screen flex flex-col md:items-center md:justify-center px-6 py-12 md:px-4 transition-colors duration-500",
       isDarkMode ? "bg-[#0D0D0D] text-[#FDFBF0]" : "bg-[#FDFBF0] text-[#2e2f2d]"
     )}>
-      <div className="max-w-md mx-auto w-full flex-1 flex flex-col">
+      <div className={cn(
+        "w-full max-w-md",
+        "md:rounded-3xl md:px-10 md:py-10 md:transition-colors md:duration-500",
+        isDarkMode ? "md:bg-[#111111] md:shadow-2xl" : "md:bg-white md:shadow-xl md:border md:border-black/5"
+      )}>
         {/* Logo/Header */}
         <div className="mb-12 text-center">
           <img

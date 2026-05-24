@@ -155,6 +155,7 @@ export default function App() {
               isDarkMode={isDarkMode}
               sales={sales}
               expenses={expenses}
+              debts={debts}
               userId={user.uid}
               userName={profile?.firstName}
             />

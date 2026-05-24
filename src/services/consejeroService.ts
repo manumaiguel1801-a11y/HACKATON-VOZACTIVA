@@ -1,12 +1,13 @@
 import { GoogleGenAI, Type } from '@google/genai';
 import { Meta, ConsejeroMessage } from '../types';
 import { FinancialContext } from './financialAnalysis';
+import { generateConsejeroResponse } from '../agentes/consejeroAgente';
 
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || '' });
 
 // gemini-2.5-flash para todo — soporta streaming SSE y es gratuito
-const MODEL_FAST = 'gemini-2.5-flash';
-const MODEL_BEST = 'gemini-2.5-flash';
+const MODEL_FAST = 'gemini-2.0-flash';
+const MODEL_BEST = 'gemini-1.5-pro';
 
 export function getUnconfirmedDays(meta: Meta): string[] {
   return (meta.registros || [])
@@ -220,35 +221,53 @@ export async function sendMessageToConsejero(
   isProactive: boolean,
   onChunk: (text: string) => void
 ): Promise<string> {
-  const model = selectModel(userMessage, meta, isProactive);
-  const systemPrompt = buildSystemPrompt(firstName, ctx, meta);
-
-  // Gemini usa 'model' en vez de 'assistant'
-  const contents = [
-    ...history.slice(-30).map(m => ({
-      role: m.role === 'assistant' ? 'model' : 'user',
-      parts: [{ text: m.content }],
-    })),
-    ...(userMessage ? [{ role: 'user', parts: [{ text: userMessage }] }] : []),
-  ];
-
-  let fullText = '';
-
-  const stream = await ai.models.generateContentStream({
-    model,
-    contents,
-    config: {
-      systemInstruction: systemPrompt,
-    },
-  });
-
-  for await (const chunk of stream) {
-    const text = chunk.text;
-    if (text) {
-      fullText += text;
-      onChunk(text);
+  try {
+    // Intentamos usar el agente avanzado (Claude)
+    const response = await generateConsejeroResponse(
+      userMessage,
+      history,
+      ctx,
+      meta,
+      firstName,
+      (step) => onChunk('') // Opcionalmente podrías mostrar pasos
+    );
+    
+    // Simulamos streaming para el UI
+    for (let i = 0; i < response.length; i += 5) {
+      onChunk(response.slice(i, i + 5));
+      await new Promise(r => setTimeout(r, 10));
     }
-  }
+    
+    return response;
+  } catch (err) {
+    console.error('Error en agente Claude, usando fallback Gemini:', err);
+    
+    // FALLBACK: Mantener la lógica original con Gemini
+    const model = selectModel(userMessage, meta, isProactive);
+    const systemPrompt = buildSystemPrompt(firstName, ctx, meta);
 
-  return fullText;
+    const contents = [
+      ...history.slice(-30).map(m => ({
+        role: m.role === 'assistant' ? 'model' : 'user',
+        parts: [{ text: m.content }],
+      })),
+      ...(userMessage ? [{ role: 'user', parts: [{ text: userMessage }] }] : []),
+    ];
+
+    let fullText = '';
+    const stream = await ai.models.generateContentStream({
+      model,
+      contents,
+      config: { systemInstruction: systemPrompt },
+    });
+
+    for await (const chunk of stream) {
+      const text = chunk.text;
+      if (text) {
+        fullText += text;
+        onChunk(text);
+      }
+    }
+    return fullText;
+  }
 }
