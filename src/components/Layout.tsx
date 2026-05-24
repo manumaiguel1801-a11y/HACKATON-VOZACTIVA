@@ -169,13 +169,6 @@ export const Layout = ({
             </React.Fragment>
           ))}
           <SidebarButton
-            active={activeTab === 'pasaporte'}
-            onClick={() => setActiveTab('pasaporte')}
-            icon={<Wallet />}
-            label="Pasaporte"
-            isDarkMode={isDarkMode}
-          />
-          <SidebarButton
             active={activeTab === 'perfil'}
             onClick={() => setActiveTab('perfil')}
             icon={<User />}
