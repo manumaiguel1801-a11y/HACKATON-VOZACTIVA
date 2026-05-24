@@ -15,6 +15,7 @@ export interface GeminiResponse {
   message: string;
   data?: ParsedMovement;
   movements?: ParsedMovement[];
+  debug?: string;
 }
 
 export interface HistoryEntry {
@@ -240,20 +241,64 @@ const SCHEMA_CONFIG = {
 
 export async function parseMovement(text: string, history: HistoryEntry[] = []): Promise<GeminiResponse> {
   const key = process.env.GEMINI_API_KEY;
-  if (!key) return { message: 'GEMINI_API_KEY no configurada.' };
+  if (!key) {
+    return {
+      message: 'GEMINI_API_KEY no configurada.',
+      debug: '[DEBUG] process.env.GEMINI_API_KEY is missing/empty in the deployed function.',
+    };
+  }
 
   const client = new GoogleGenAI({ apiKey: key });
   const contents = [...history, { role: 'user', parts: [{ text }] }];
 
-  let lastErrorMsg = '';
+  const attempts: string[] = [];
   for (const model of MODELS) {
     try {
-      const response = await client.models.generateContent({ model, contents, config: SCHEMA_CONFIG } as any);
-      return JSON.parse(response.text || '{}') as GeminiResponse;
+      const response: any = await client.models.generateContent({ model, contents, config: SCHEMA_CONFIG } as any);
+
+      const finishReason = response?.candidates?.[0]?.finishReason;
+      const blockReason = response?.promptFeedback?.blockReason;
+      const rawText = response?.text;
+
+      if (blockReason) {
+        attempts.push(`${model}: blocked=${blockReason}`);
+        console.warn(`[Gemini] ${model} blocked:`, blockReason, response?.promptFeedback);
+        continue;
+      }
+      if (finishReason && finishReason !== 'STOP') {
+        attempts.push(`${model}: finishReason=${finishReason} textLen=${(rawText ?? '').length}`);
+        console.warn(`[Gemini] ${model} non-STOP finish:`, finishReason, 'text:', rawText);
+        continue;
+      }
+      if (!rawText) {
+        attempts.push(`${model}: empty text (finish=${finishReason ?? 'none'})`);
+        console.warn(`[Gemini] ${model} empty text. Full response:`, JSON.stringify(response).slice(0, 800));
+        continue;
+      }
+
+      try {
+        const parsed = JSON.parse(rawText) as GeminiResponse;
+        if (!parsed.message && !parsed.data) {
+          attempts.push(`${model}: parsed empty object`);
+          console.warn(`[Gemini] ${model} parsed but empty:`, rawText.slice(0, 300));
+          continue;
+        }
+        return parsed;
+      } catch (parseErr: any) {
+        attempts.push(`${model}: JSON parse fail — ${parseErr?.message}`);
+        console.warn(`[Gemini] ${model} JSON parse fail. Raw:`, rawText.slice(0, 500));
+        continue;
+      }
     } catch (err: any) {
-      lastErrorMsg = err?.message ?? String(err);
-      console.warn(`[Gemini] ${model} failed:`, lastErrorMsg);
+      const msg = err?.message ?? String(err);
+      attempts.push(`${model}: throw — ${msg}`);
+      console.warn(`[Gemini] ${model} threw:`, msg, err?.stack?.slice(0, 400));
     }
   }
-  return { message: `No pude entender el mensaje. (Error: ${lastErrorMsg}). Ejemplo: "vendí 3 jugos a 3000".` };
+
+  const debug = `[DEBUG GEMINI]\n• key set: yes (len=${key.length})\n• models tried: ${MODELS.join(', ')}\n• attempts:\n  - ${attempts.join('\n  - ')}`;
+  return {
+    message: 'No pude entender el mensaje. Ejemplo: "vendí 3 jugos a 3000".',
+    debug,
+  };
 }
