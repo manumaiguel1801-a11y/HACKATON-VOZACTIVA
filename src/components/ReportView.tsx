@@ -27,6 +27,7 @@ const SECTION_ICONS: Record<string, React.ElementType> = {
 };
 
 const NOTIF_OPTIONS: { value: ReportPeriod; label: string }[] = [
+  { value: '1d',  label: 'Cada día' },
   { value: '7d',  label: 'Cada semana' },
   { value: '14d', label: 'Cada 2 semanas' },
   { value: '21d', label: 'Cada 3 semanas' },

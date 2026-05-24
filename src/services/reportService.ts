@@ -1,9 +1,10 @@
 import { GoogleGenAI } from '@google/genai';
 import { Sale, Expense } from '../types';
 
-export type ReportPeriod = '7d' | '14d' | '21d' | 'mes';
+export type ReportPeriod = '1d' | '7d' | '14d' | '21d' | 'mes';
 
 export const PERIOD_CONFIG: Record<ReportPeriod, { label: string; sub: string; days: number | null }> = {
+  '1d':  { label: 'Hoy',          sub: 'Solo hoy',         days: 1 },
   '7d':  { label: 'Esta semana',  sub: 'Últimos 7 días',   days: 7 },
   '14d': { label: '2 semanas',    sub: 'Últimos 14 días',  days: 14 },
   '21d': { label: '3 semanas',    sub: 'Últimos 21 días',  days: 21 },
@@ -167,6 +168,12 @@ Una sola frase clara y contundente sobre el estado del negocio.
 - Sé directo, útil y accionable`;
 }
 
+const REPORT_MODELS = [
+  'gemini-2.0-flash',
+  'gemini-2.0-flash-exp',
+  'gemini-1.5-flash',
+];
+
 export async function generateFinancialReport(
   sales: Sale[],
   expenses: Expense[],
@@ -178,12 +185,16 @@ export async function generateFinancialReport(
 
   const client = new GoogleGenAI({ apiKey: key });
   const prompt = buildPrompt(sales, expenses, period, userName);
-  const contents = [{ role: 'user', parts: [{ text: prompt }] }];
 
-  for (const model of ['gemini-2.5-flash', 'gemini-2.0-flash']) {
+  for (const model of REPORT_MODELS) {
     try {
-      const response = await client.models.generateContent({ model, contents } as any);
+      const response = await client.models.generateContent({
+        model,
+        contents: [{ role: 'user' as const, parts: [{ text: prompt }] }],
+        config: { responseMimeType: 'text/plain' },
+      });
       const raw = response.text ?? '';
+      if (!raw.trim()) continue;
       return parseReport(raw);
     } catch (err: any) {
       console.warn(`[Report] ${model} falló:`, err?.message ?? err);
