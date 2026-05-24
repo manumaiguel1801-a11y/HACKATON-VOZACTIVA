@@ -14,6 +14,7 @@ import {
   Bell,
   LogOut,
   X,
+  Sparkles,
 } from 'lucide-react';
 import { signOut } from 'firebase/auth';
 import { auth } from '../firebase';
@@ -71,9 +72,9 @@ export const Layout = ({
   const navItems: { tab: Tab; icon: React.ReactNode; label: string }[] = [
     { tab: 'inicio',     icon: <Home />,      label: 'Inicio' },
     { tab: 'finanzas',   icon: <TrendingUp />, label: 'Finanzas' },
+    { tab: 'consejero',  icon: <Sparkles />,   label: 'Consejero' },
     { tab: 'camara',     icon: <Users />,      label: 'Deudas' },
     { tab: 'inventario', icon: <Package />,    label: 'Inventario' },
-    { tab: 'pasaporte',  icon: <Wallet />,     label: 'Pasaporte' },
   ];
 
   return (
@@ -184,6 +185,13 @@ export const Layout = ({
               />
             </React.Fragment>
           ))}
+          <SidebarButton
+            active={activeTab === 'pasaporte'}
+            onClick={() => setActiveTab('pasaporte')}
+            icon={<Wallet />}
+            label="Pasaporte"
+            isDarkMode={isDarkMode}
+          />
           <SidebarButton
             active={activeTab === 'perfil'}
             onClick={() => setActiveTab('perfil')}

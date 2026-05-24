@@ -244,13 +244,15 @@ export async function parseMovement(text: string, history: HistoryEntry[] = []):
   const client = new GoogleGenAI({ apiKey: key });
   const contents = [...history, { role: 'user', parts: [{ text }] }];
 
+  let lastErrorMsg = '';
   for (const model of MODELS) {
     try {
       const response = await client.models.generateContent({ model, contents, config: SCHEMA_CONFIG } as any);
       return JSON.parse(response.text || '{}') as GeminiResponse;
     } catch (err: any) {
-      console.warn(`[Gemini] ${model} failed:`, err?.message ?? err);
+      lastErrorMsg = err?.message ?? String(err);
+      console.warn(`[Gemini] ${model} failed:`, lastErrorMsg);
     }
   }
-  return { message: 'No pude entender el mensaje. Ejemplo: "vendí 3 jugos a 3000".' };
+  return { message: `No pude entender el mensaje. (Error: ${lastErrorMsg}). Ejemplo: "vendí 3 jugos a 3000".` };
 }

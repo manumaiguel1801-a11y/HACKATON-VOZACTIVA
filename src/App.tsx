@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { onAuthStateChanged, User } from 'firebase/auth';
 import { doc, onSnapshot, collection, query, orderBy } from 'firebase/firestore';
 import { auth, db } from './firebase';
-import { Tab, UserProfile, Sale, Expense, Debt, InventoryProduct } from './types';
+import { Tab, UserProfile, Sale, Expense, Debt, InventoryProduct, Meta } from './types';
 
 import { Layout } from './components/Layout';
 import { Dashboard } from './components/Dashboard';
@@ -12,6 +12,8 @@ import { CameraView } from './components/CameraView';
 import { InventorySalesView } from './components/InventorySalesView';
 import { PassportView } from './components/PassportView';
 import { ProfileView } from './components/ProfileView';
+import { ConsejeroView } from './components/ConsejeroView';
+import { CreditView } from './components/CreditView';
 import { Auth } from './components/Auth';
 import { VerificationView } from './components/VerificationView';
 
@@ -22,6 +24,7 @@ export default function App() {
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [debts, setDebts] = useState<Debt[]>([]);
   const [inventory, setInventory] = useState<InventoryProduct[]>([]);
+  const [metas, setMetas] = useState<Meta[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<Tab>('inicio');
   const [isDarkMode, setIsDarkMode] = useState<boolean>(false);
@@ -93,6 +96,15 @@ export default function App() {
     }, console.error);
   }, [user]);
 
+  // Metas (Consejero)
+  useEffect(() => {
+    if (!user) return;
+    const q = query(collection(db, 'users', user.uid, 'metas'), orderBy('fechaInicio', 'desc'));
+    return onSnapshot(q, (snap) => {
+      setMetas(snap.docs.map((d) => ({ id: d.id, ...d.data() } as Meta)));
+    }, console.error);
+  }, [user]);
+
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-[#FDFBF0]">
@@ -150,6 +162,20 @@ export default function App() {
             <PassportView isDarkMode={isDarkMode} sales={sales} expenses={expenses} debts={debts} profile={profile} userId={user.uid} />
           </motion.div>
         )}
+        {activeTab === 'consejero' && (
+          <motion.div key="consejero" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }}>
+            <ConsejeroView
+              isDarkMode={isDarkMode}
+              userId={user.uid}
+              sales={sales}
+              expenses={expenses}
+              debts={debts}
+              inventory={inventory}
+              metas={metas}
+              profile={profile}
+            />
+          </motion.div>
+        )}
         {activeTab === 'perfil' && profile && (
           <motion.div key="profile" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }}>
             <ProfileView
@@ -160,6 +186,18 @@ export default function App() {
               expenses={expenses}
               debts={debts}
               onNavigate={setActiveTab}
+            />
+          </motion.div>
+        )}
+        {activeTab === 'credito' && profile && (
+          <motion.div key="credito" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }}>
+            <CreditView
+              isDarkMode={isDarkMode}
+              onNavigate={setActiveTab}
+              firstName={profile.firstName}
+              sales={sales}
+              expenses={expenses}
+              debts={debts}
             />
           </motion.div>
         )}

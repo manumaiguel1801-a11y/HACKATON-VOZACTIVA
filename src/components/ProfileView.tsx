@@ -26,6 +26,8 @@ import {
   Clock,
   Smartphone,
   Wallet,
+  DoorOpen,
+  Landmark,
 } from 'lucide-react';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { cn } from '../lib/utils';
@@ -706,18 +708,41 @@ export const ProfileView = ({
 
       {/* ── Mobile layout ── */}
       <div className="md:hidden space-y-6 max-w-lg mx-auto">
-        {/* Avatar section */}
-        <div className="flex flex-col items-center py-6">
-          <button onClick={() => setShowPhotoOptions(true)} className="relative group" aria-label="Cambiar foto de perfil">
-            <div className="rounded-full overflow-hidden border-4 border-[#B8860B] shadow-xl w-32 h-32">
-              <Avatar photoURL={profile.photoURL} firstName={profile.firstName} lastName={profile.lastName} size="lg" isDarkMode={isDarkMode} />
+
+        {/* ── Gateway: vida crediticia ── */}
+        <div
+          className="relative overflow-hidden rounded-3xl cursor-pointer active:scale-[0.98] transition-transform"
+          style={{ background: 'linear-gradient(135deg, #0D0D0D 0%, #1c1400 60%, #2A1F00 100%)' }}
+          onClick={() => onNavigate?.('credito')}>
+          {/* Decoración */}
+          <div className="absolute top-0 right-0 w-40 h-40 rounded-full bg-[#FFD700]/5 -translate-y-10 translate-x-10 pointer-events-none" />
+          <div className="absolute bottom-0 left-0 w-28 h-28 rounded-full bg-[#B8860B]/8 translate-y-8 -translate-x-6 pointer-events-none" />
+
+          <div className="relative p-6">
+            <div className="flex items-center gap-2 mb-3">
+              <Landmark className="w-4 h-4 text-[#FFD700]" />
+              <p className="text-[#FFD700] text-[10px] font-black uppercase tracking-widest">Voz Activa Crédito</p>
             </div>
-            <div className="absolute bottom-0 right-0 w-9 h-9 rounded-full bg-[#B8860B] flex items-center justify-center shadow-lg border-2 border-[#FDFBF0] group-active:scale-90 transition-transform">
-              <Camera className="w-4 h-4 text-black" />
+
+            <p className="text-white font-black text-xl leading-snug mb-2">
+              ¿Cómo quieres empezar tu vida crediticia?
+            </p>
+            <p className="text-white/45 text-xs leading-relaxed mb-5">
+              Accede a microcréditos, seguros y servicios financieros pensados para vendedores como tú.
+            </p>
+
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-[#B8860B] to-[#FFD700] flex items-center justify-center shadow">
+                  <DoorOpen className="w-4 h-4 text-black" />
+                </div>
+                <span className="text-[#FFD700] text-sm font-black">Explorar opciones</span>
+              </div>
+              <div className="w-8 h-8 rounded-full bg-white/10 flex items-center justify-center">
+                <ChevronRight className="w-4 h-4 text-white/60" />
+              </div>
             </div>
-          </button>
-          <h2 className="mt-4 text-2xl font-bold font-['Plus_Jakarta_Sans']">{profile.firstName} {profile.lastName}</h2>
-          <p className={cn('text-sm opacity-60', isDarkMode ? 'text-[#FDFBF0]' : 'text-[#2e2f2d]')}>Vendedor Informal Verificado</p>
+          </div>
         </div>
 
         {/* Profile fields */}
@@ -879,6 +904,23 @@ export const ProfileView = ({
           <div className="flex-1 text-left"><p className="font-black text-sm">PQRS · Contáctanos</p><p className={cn('text-[11px] font-medium', isDarkMode ? 'text-white/40' : 'text-black/40')}>Sugerencias, felicitaciones, quejas o reclamos</p></div>
           <ChevronRight className={cn('w-4 h-4 flex-shrink-0', isDarkMode ? 'text-white/20' : 'text-black/20')} />
         </button>
+
+        {/* ── Avatar + nombre (fondo) ── */}
+        <div className="flex flex-col items-center pt-2 pb-6">
+          <button onClick={() => setShowPhotoOptions(true)} className="relative group" aria-label="Cambiar foto de perfil">
+            <div className="rounded-full overflow-hidden border-4 border-[#B8860B] shadow-xl w-24 h-24">
+              <Avatar photoURL={profile.photoURL} firstName={profile.firstName} lastName={profile.lastName} size="lg" isDarkMode={isDarkMode} />
+            </div>
+            <div className="absolute bottom-0 right-0 w-8 h-8 rounded-full bg-[#B8860B] flex items-center justify-center shadow-lg border-2 border-[#FDFBF0] group-active:scale-90 transition-transform">
+              <Camera className="w-3.5 h-3.5 text-black" />
+            </div>
+          </button>
+          <h2 className="mt-3 text-xl font-bold font-['Plus_Jakarta_Sans']">{profile.firstName} {profile.lastName}</h2>
+          <p className={cn('text-xs mt-1 px-3 py-1 rounded-full font-bold',
+            isDarkMode ? 'bg-emerald-500/15 text-emerald-400' : 'bg-emerald-50 text-emerald-700')}>
+            ● Vendedor activo verificado
+          </p>
+        </div>
       </div>
 
       {/* ── Desktop layout ── */}
