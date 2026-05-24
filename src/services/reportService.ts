@@ -1,7 +1,14 @@
 import { GoogleGenAI } from '@google/genai';
 import { Sale, Expense } from '../types';
 
-export type ReportPeriod = 'semanal' | 'mensual';
+export type ReportPeriod = '7d' | '14d' | '21d' | 'mes';
+
+export const PERIOD_CONFIG: Record<ReportPeriod, { label: string; sub: string; days: number | null }> = {
+  '7d':  { label: 'Esta semana',  sub: 'Últimos 7 días',   days: 7 },
+  '14d': { label: '2 semanas',    sub: 'Últimos 14 días',  days: 14 },
+  '21d': { label: '3 semanas',    sub: 'Últimos 21 días',  days: 21 },
+  'mes': { label: 'Este mes',     sub: 'Mes en curso',     days: null },
+};
 
 export interface ReportSection {
   title: string;
@@ -56,9 +63,10 @@ function buildPrompt(
   let start: Date;
   let periodoLabel: string;
 
-  if (period === 'semanal') {
-    start = new Date(now.getTime() - 7 * 24 * 3600 * 1000);
-    periodoLabel = `Semana del ${start.toLocaleDateString('es-CO', { day: '2-digit', month: 'short' })} al ${now.toLocaleDateString('es-CO', { day: '2-digit', month: 'short', year: 'numeric' })}`;
+  const cfg = PERIOD_CONFIG[period];
+  if (cfg.days !== null) {
+    start = new Date(now.getTime() - cfg.days * 24 * 3600 * 1000);
+    periodoLabel = `${cfg.label} (${start.toLocaleDateString('es-CO', { day: '2-digit', month: 'short' })} – ${now.toLocaleDateString('es-CO', { day: '2-digit', month: 'short', year: 'numeric' })})`;
   } else {
     start = new Date(now.getFullYear(), now.getMonth(), 1);
     periodoLabel = now.toLocaleDateString('es-CO', { month: 'long', year: 'numeric' });
