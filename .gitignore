@@ -13,3 +13,4 @@ firebase-applet-config.json
 # Local tooling — no subir al repo
 .claude/
 fix-telegram.cjs
+.vercel

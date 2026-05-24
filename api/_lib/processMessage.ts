@@ -142,16 +142,17 @@ export async function processMessage(
 ): Promise<ProcessResult> {
   const result = await parseMovement(text, history);
 
+  if (!result.data) {
+    await send(result.message || MSG_HELP_FALLBACK);
+    // No actualizamos historial en fallo — evita que Gemini repita el error en siguientes mensajes
+    return { updatedHistory: history };
+  }
+
   const updatedHistory: HistoryEntry[] = [
     ...history,
     { role: 'user', parts: [{ text }] },
-    { role: 'model', parts: [{ text: result.message || MSG_HELP_FALLBACK }] },
+    { role: 'model', parts: [{ text: result.message }] },
   ];
-
-  if (!result.data) {
-    await send(result.message || MSG_HELP_FALLBACK);
-    return { updatedHistory };
-  }
 
   const now = FieldValue.serverTimestamp();
   const userRef = db.collection('users').doc(uid);
