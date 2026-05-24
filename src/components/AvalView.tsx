@@ -16,6 +16,9 @@ interface Props {
   profileBirthDate?: string;
   userName?: string;
   sales: Sale[];
+  identityVerified?: boolean;
+  verifiedCedula?: string;
+  verifiedName?: string;
 }
 
 type Step = 'info' | 'identity' | 'dashboard';
@@ -56,10 +59,11 @@ const REQUIREMENTS = [
   'Foto de perfil y datos básicos del negocio',
 ];
 
-export const AvalView = ({ isDarkMode, userId, prefillCedula = '', profileBirthDate = '', userName = '', sales }: Props) => {
-  const [step, setStep] = useState<Step>('info');
-  const [verifiedName, setVerifiedName] = useState(userName);
-  const [verifiedCedula, setVerifiedCedula] = useState(prefillCedula);
+export const AvalView = ({ isDarkMode, userId, prefillCedula = '', profileBirthDate = '', userName = '', sales, identityVerified, verifiedCedula: savedCedula, verifiedName: savedName }: Props) => {
+  const alreadyVerified = !!identityVerified;
+  const [step, setStep] = useState<Step>(alreadyVerified ? 'dashboard' : 'info');
+  const [verifiedName, setVerifiedName]     = useState(savedName || userName);
+  const [verifiedCedula, setVerifiedCedula] = useState(savedCedula || prefillCedula);
 
   const card = cn('rounded-2xl p-6', isDarkMode ? 'bg-[#1A1A1A]' : 'bg-white');
   const muted = isDarkMode ? 'text-white/40' : 'text-black/40';

@@ -198,6 +198,9 @@ export default function App() {
               profileBirthDate={profile?.birthDate}
               userName={profile?.firstName}
               sales={sales}
+              identityVerified={profile?.identityVerified}
+              verifiedCedula={profile?.cedulaExtracted}
+              verifiedName={profile?.cedulaName}
             />
           </motion.div>
         )}
