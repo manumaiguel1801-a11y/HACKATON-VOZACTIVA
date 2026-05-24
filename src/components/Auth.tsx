@@ -91,7 +91,8 @@ export const Auth = ({ isDarkMode }: AuthProps) => {
 
     try {
       if (isLogin) {
-        await signInWithEmailAndPassword(auth, email, password);
+        const loginEmail = noEmail ? `${idNumber}@vozactiva.com` : email;
+        await signInWithEmailAndPassword(auth, loginEmail, password);
       } else {
         const finalEmail = noEmail ? `${idNumber}@vozactiva.com` : email;
 
@@ -300,33 +301,67 @@ export const Auth = ({ isDarkMode }: AuthProps) => {
 
           <div className="space-y-4">
             <div className="space-y-2">
-              <Input
-                icon={<Mail />}
-                placeholder="Correo Electrónico"
-                type="email"
-                value={email}
-                onChange={setEmail}
-                isDarkMode={isDarkMode}
-                required={!noEmail}
-                disabled={noEmail}
-              />
-              {!isLogin && (
-                <label className="flex items-center gap-2.5 px-1 cursor-pointer select-none w-fit">
-                  <div
-                    onClick={() => { setNoEmail(v => !v); setEmail(''); }}
-                    className={cn(
-                      'w-5 h-5 rounded-md border-2 flex items-center justify-center transition-all flex-shrink-0',
-                      noEmail
-                        ? 'bg-[#B8860B] border-[#B8860B]'
-                        : isDarkMode ? 'border-white/30 bg-transparent' : 'border-black/20 bg-white'
-                    )}
-                  >
-                    {noEmail && <X className="w-3 h-3 text-black" strokeWidth={3} />}
-                  </div>
-                  <span className={cn('text-xs font-medium', isDarkMode ? 'text-white/60' : 'text-black/50')}>
-                    No tengo correo electrónico
-                  </span>
-                </label>
+              {/* Campo email o cédula según el modo */}
+              {isLogin && noEmail ? (
+                <Input
+                  icon={<IdCard />}
+                  placeholder="Número de Identificación"
+                  value={idNumber}
+                  onChange={setIdNumber}
+                  isDarkMode={isDarkMode}
+                  required
+                />
+              ) : (
+                <Input
+                  icon={<Mail />}
+                  placeholder="Correo Electrónico"
+                  type="email"
+                  value={email}
+                  onChange={setEmail}
+                  isDarkMode={isDarkMode}
+                  required={!noEmail}
+                  disabled={noEmail && !isLogin}
+                />
+              )}
+
+              {/* Checkbox "no tengo correo" visible en login y en registro */}
+              <label className="flex items-center gap-2.5 px-1 cursor-pointer select-none w-fit">
+                <div
+                  onClick={() => { setNoEmail(v => !v); setEmail(''); setIdNumber(''); }}
+                  className={cn(
+                    'w-5 h-5 rounded-md border-2 flex items-center justify-center transition-all flex-shrink-0',
+                    noEmail
+                      ? 'bg-[#B8860B] border-[#B8860B]'
+                      : isDarkMode ? 'border-white/30 bg-transparent' : 'border-black/20 bg-white'
+                  )}
+                >
+                  {noEmail && <X className="w-3 h-3 text-black" strokeWidth={3} />}
+                </div>
+                <span className={cn('text-xs font-medium', isDarkMode ? 'text-white/60' : 'text-black/50')}>
+                  No tengo correo electrónico
+                </span>
+              </label>
+
+              {/* Nota en LOGIN con cédula */}
+              {isLogin && noEmail && (
+                <div className={cn(
+                  'rounded-xl px-3.5 py-2.5 flex items-start gap-2 text-xs font-medium',
+                  isDarkMode ? 'bg-[#B8860B]/10 text-[#DAA520]' : 'bg-amber-50 border border-amber-200 text-amber-800'
+                )}>
+                  <IdCard className="w-4 h-4 flex-shrink-0 mt-0.5" />
+                  <span>Ingresa el número de identificación con el que te registraste y tu contraseña para entrar.</span>
+                </div>
+              )}
+
+              {/* Nota en REGISTRO sin correo */}
+              {!isLogin && noEmail && (
+                <div className={cn(
+                  'rounded-xl px-3.5 py-2.5 flex items-start gap-2 text-xs font-medium',
+                  isDarkMode ? 'bg-[#B8860B]/10 text-[#DAA520]' : 'bg-amber-50 border border-amber-200 text-amber-800'
+                )}>
+                  <IdCard className="w-4 h-4 flex-shrink-0 mt-0.5" />
+                  <span>Para iniciar sesión usarás tu <strong>número de identificación</strong> y tu contraseña. No necesitas correo electrónico.</span>
+                </div>
               )}
             </div>
             <Input
@@ -419,7 +454,7 @@ export const Auth = ({ isDarkMode }: AuthProps) => {
               )}
               <p className="opacity-60 font-medium">¿No tienes cuenta?</p>
               <button
-                onClick={() => { setIsLogin(false); setNoEmail(false); setConfirmPassword(''); setShowPassword(false); setShowConfirmPassword(false); setResetSent(false); setError(''); }}
+                onClick={() => { setIsLogin(false); setNoEmail(false); setEmail(''); setIdNumber(''); setConfirmPassword(''); setShowPassword(false); setShowConfirmPassword(false); setResetSent(false); setError(''); }}
                 className="text-[#B8860B] font-bold hover:underline"
               >
                 Crear Cuenta
@@ -427,7 +462,7 @@ export const Auth = ({ isDarkMode }: AuthProps) => {
             </>
           ) : (
             <button
-              onClick={() => { setIsLogin(true); setConfirmPassword(''); setShowPassword(false); setShowConfirmPassword(false); }}
+              onClick={() => { setIsLogin(true); setNoEmail(false); setEmail(''); setIdNumber(''); setConfirmPassword(''); setShowPassword(false); setShowConfirmPassword(false); }}
               className="flex items-center justify-center gap-2 text-[#B8860B] font-bold mx-auto hover:underline"
             >
               <ChevronLeft className="w-5 h-5" />
