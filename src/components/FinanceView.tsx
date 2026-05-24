@@ -1,8 +1,8 @@
 import React, { useMemo, useState, useRef, useEffect } from 'react';
 import {
   ArrowUpRight, ArrowDownRight, BarChart2, TrendingUp, TrendingDown,
-  ShoppingBag, ChevronRight, ChevronDown, Send, MessageCircle, Lightbulb,
-  Wallet, Calendar, X, Check,
+  ShoppingBag, ChevronRight, ChevronDown, Send, MessageCircle,
+  Wallet, Calendar, Check,
 } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, ResponsiveContainer, CartesianGrid, Tooltip } from 'recharts';
 import { cn } from '../lib/utils';
@@ -141,7 +141,6 @@ export const FinanceView = ({ isDarkMode, sales, expenses, userId, userName }: P
   const [selectedExpense, setSelectedExpense] = useState<Expense | null>(null);
   const [showSaleModal, setShowSaleModal] = useState(false);
   const [showExpenseModal, setShowExpenseModal] = useState(false);
-  const [dismissedTips, setDismissedTips] = useState<Set<string>>(() => new Set());
   const [chartPeriod, setChartPeriod] = useState<ChartPeriod>('7d');
   const [showChartMenu, setShowChartMenu] = useState(false);
   const chartMenuRef = useRef<HTMLDivElement>(null);
@@ -195,29 +194,6 @@ export const FinanceView = ({ isDarkMode, sales, expenses, userId, userName }: P
     ...sales.map<Movement>(s => ({ kind: 'sale', date: getSaleDate(s), data: s })),
     ...expenses.map<Movement>(e => ({ kind: 'expense', date: getExpenseDate(e), data: e })),
   ].sort((a, b) => b.date.getTime() - a.date.getTime()), [sales, expenses]);
-
-  // ── tips ──────────────────────────────────────────────────────────────────
-  const tips = useMemo(() => {
-    const all: { id: string; text: string }[] = [];
-    if (stats.monthIncome > 0 && stats.monthExp / stats.monthIncome > 0.7) {
-      const pct = Math.round((stats.monthExp / stats.monthIncome) * 100);
-      all.push({ id: 'high-expenses', text: `Por cada $100 que entran, $${pct} se van en gastos. ¿Hay algo que puedas reducir?` });
-    }
-    if (vsYest > 0) all.push({ id: 'vs-yesterday', text: `Hoy llevas ${fmt(vsYest)} más que ayer. ¡Buen ritmo de ventas!` });
-    const now = new Date();
-    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    const todayIncome = sales.filter(s => getSaleDate(s) >= todayStart).reduce((a, x) => a + x.total, 0);
-    const weekStart = new Date(now.getTime() - 6 * 86_400_000);
-    const prevWeekMax = Math.max(...Array.from({ length: 6 }, (_, i) => {
-      const d = new Date(weekStart.getTime() + i * 86_400_000);
-      const dEnd = new Date(d.getTime() + 86_400_000);
-      return sales.filter(s => { const sd = getSaleDate(s); return sd >= d && sd < dEnd; }).reduce((a, x) => a + x.total, 0);
-    }), 0);
-    if (todayIncome > 0 && todayIncome > prevWeekMax) all.push({ id: 'best-day', text: '¡Hoy fue tu mejor día de ventas de la semana! Sigue así.' });
-    if (balance > 0) all.push({ id: 'positive-balance', text: `Llevas ${fmt(balance)} de utilidad este mes. Tu negocio está en positivo.` });
-    if (all.length === 0) all.push({ id: 'default', text: 'Registra tus ventas y gastos cada día para ver cómo crece tu negocio.' });
-    return all.filter(t => !dismissedTips.has(t.id));
-  }, [stats, vsYest, sales, balance, dismissedTips]);
 
   const metrics = [
     { label: 'Ingresos',       sub: 'Este mes', value: fmt(stats.monthIncome), color: 'text-green-600',                           bg: isDarkMode ? 'bg-green-500/20'  : 'bg-green-50',  Icon: ArrowUpRight,  iconColor: 'text-green-600' },
@@ -453,40 +429,6 @@ export const FinanceView = ({ isDarkMode, sales, expenses, userId, userName }: P
           )}
         </div>
       </div>
-
-      {/* ── Row 4: Tips ──────────────────────────────────────────────────── */}
-      {tips.length > 0 && (
-        <div className="space-y-2">
-          <p className={cn('text-xs font-bold uppercase tracking-widest px-1', muted)}>Consejos</p>
-          <div className="flex gap-3 overflow-x-auto pb-1 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
-            {tips.map(tip => (
-              <div
-                key={tip.id}
-                className={cn(
-                  'flex-shrink-0 w-72 rounded-2xl p-4 flex items-start gap-3',
-                  isDarkMode ? 'bg-[#1e1a00]' : 'bg-[#FFF8E7]'
-                )}
-              >
-                <div className="flex-shrink-0 w-9 h-9 rounded-full flex items-center justify-center bg-[#B8860B]/15">
-                  <Lightbulb className="w-4 h-4 text-[#B8860B]" />
-                </div>
-                <p className={cn('flex-1 text-sm font-medium leading-snug', isDarkMode ? 'text-[#FDFBF0]/70' : 'text-[#5b5c5a]')}>
-                  {tip.text}
-                </p>
-                <button
-                  onClick={() => setDismissedTips(prev => new Set([...prev, tip.id]))}
-                  className={cn(
-                    'flex-shrink-0 w-6 h-6 rounded-full flex items-center justify-center transition-colors',
-                    isDarkMode ? 'hover:bg-white/10 text-white/40' : 'hover:bg-black/5 text-black/30'
-                  )}
-                >
-                  <X className="w-3.5 h-3.5" />
-                </button>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
 
       {/* Modals */}
       {showSaleModal && (
