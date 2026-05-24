@@ -3,10 +3,10 @@ import {
   ShieldCheck, ChevronLeft, FileText, Upload, CheckCircle2,
   Lock, BarChart3, Building2, ChevronRight, X,
   FileCheck, AlertCircle, Sparkles, QrCode, Loader2,
-  TrendingUp, TrendingDown, ChevronDown, ChevronUp,
+  TrendingUp, TrendingDown, ChevronDown, ChevronUp, Link2,
 } from 'lucide-react';
 import { cn } from '../lib/utils';
-import { analyzeExtracto, ExtractoAnalysis } from '../services/extractoService';
+import { analyzeExtracto, buildAnalysis, ExtractoAnalysis, ExtractoTransaction } from '../services/extractoService';
 import { Sale } from '../types';
 
 interface Props {
@@ -199,11 +199,28 @@ function AnalysisCard({ analysis, isDarkMode, text, muted }: {
   );
 }
 
+type BelvoStatus = 'idle' | 'loading-script' | 'opening' | 'fetching' | 'done' | 'error';
+
+function loadBelvoScript(): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if ((window as any).belvoSDK) { resolve(); return; }
+    const s = document.createElement('script');
+    s.src = 'https://cdn.belvo.io/belvo-widget-1-stable.js';
+    s.onload  = () => resolve();
+    s.onerror = () => reject(new Error('No se pudo cargar el widget de Belvo'));
+    document.head.appendChild(s);
+  });
+}
+
 export const AvalDashboard = ({ isDarkMode, cedula, userName, sales, onBack }: Props) => {
   const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
   const [isDragging, setIsDragging]       = useState(false);
   const [showExtractos, setShowExtractos] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const [belvoStatus,   setBelvoStatus]   = useState<BelvoStatus>('idle');
+  const [belvoAnalysis, setBelvoAnalysis] = useState<ExtractoAnalysis | null>(null);
+  const [belvoError,    setBelvoError]    = useState('');
 
   const card  = cn('rounded-2xl p-5', isDarkMode ? 'bg-[#1A1A1A]' : 'bg-white');
   const muted = isDarkMode ? 'text-white/40' : 'text-black/40';
@@ -245,6 +262,54 @@ export const AvalDashboard = ({ isDarkMode, cedula, userName, sales, onBack }: P
 
   const removeFile = (id: string) => setUploadedFiles(prev => prev.filter(f => f.id !== id));
 
+  const handleConnectBelvo = async () => {
+    setBelvoError('');
+    setBelvoStatus('loading-script');
+    try {
+      await loadBelvoScript();
+      setBelvoStatus('opening');
+
+      // Get widget access token from our server
+      const tokenResp = await fetch('/api/belvo-token', { method: 'POST' });
+      if (!tokenResp.ok) {
+        const err = await tokenResp.json();
+        throw new Error(err.error ?? 'No se pudo iniciar la conexión');
+      }
+      const { access } = await tokenResp.json();
+
+      // Open Belvo widget
+      (window as any).belvoSDK.createWidget(access, {
+        callback: async (linkId: string, institution: string) => {
+          setBelvoStatus('fetching');
+          try {
+            const txResp = await fetch(`/api/belvo-transactions?linkId=${linkId}`);
+            if (!txResp.ok) throw new Error('Error obteniendo transacciones');
+            const data = await txResp.json();
+
+            const analysis = buildAnalysis(
+              data.transactions as ExtractoTransaction[],
+              data.entidad ?? institution,
+              sales,
+            );
+            setBelvoAnalysis(analysis);
+            setBelvoStatus('done');
+            setShowExtractos(true);
+          } catch (err: any) {
+            setBelvoError(err.message);
+            setBelvoStatus('error');
+          }
+        },
+        onExit: () => {
+          if (belvoStatus === 'opening') setBelvoStatus('idle');
+        },
+        onEvent: () => {},
+      });
+    } catch (err: any) {
+      setBelvoError(err.message);
+      setBelvoStatus('error');
+    }
+  };
+
   return (
     <div className="space-y-5 pb-10 animate-in fade-in slide-in-from-bottom-4 duration-500">
 
@@ -280,6 +345,60 @@ export const AvalDashboard = ({ isDarkMode, cedula, userName, sales, onBack }: P
               <p className="text-xs font-bold text-[#2e2f2d]">Cédula {maskedCedula}</p>
             </div>
           </div>
+        </div>
+      </div>
+
+      {/* ── Conectar cuenta bancaria (Belvo) ──────────────────────────────── */}
+      <div className={cn(card, 'space-y-3')}>
+        <div className="flex items-center gap-3">
+          <div className={cn('w-10 h-10 rounded-xl flex items-center justify-center', isDarkMode ? 'bg-[#B8860B]/15' : 'bg-[#FFF8DC]')}>
+            <Link2 className="w-5 h-5 text-[#B8860B]" />
+          </div>
+          <div>
+            <p className={cn('font-black text-sm', text)}>Conectar cuenta bancaria</p>
+            <p className={cn('text-xs', muted)}>Nequi, Daviplata, Davivienda · Datos directos del banco</p>
+          </div>
+        </div>
+
+        {belvoStatus === 'idle' || belvoStatus === 'error' ? (
+          <button
+            onClick={handleConnectBelvo}
+            className="w-full py-3.5 flex items-center justify-center gap-2 rounded-xl font-black text-sm bg-gradient-to-r from-[#B8860B] to-[#DAA520] text-white shadow-md active:scale-[0.98] transition-all"
+          >
+            <Link2 className="w-4 h-4" />
+            Conectar mi cuenta
+          </button>
+        ) : belvoStatus === 'done' ? (
+          <div className="flex items-center gap-2 py-2">
+            <CheckCircle2 className="w-4 h-4 text-green-500" />
+            <span className="text-sm font-black text-green-600">Cuenta conectada y verificada</span>
+          </div>
+        ) : (
+          <div className="flex items-center gap-2 py-2">
+            <Loader2 className="w-4 h-4 animate-spin text-[#B8860B]" />
+            <span className={cn('text-sm font-medium', muted)}>
+              {belvoStatus === 'loading-script' && 'Cargando widget...'}
+              {belvoStatus === 'opening'        && 'Esperando conexión...'}
+              {belvoStatus === 'fetching'       && 'Descargando transacciones...'}
+            </span>
+          </div>
+        )}
+
+        {belvoError && (
+          <p className="text-xs font-medium text-red-500 flex items-center gap-1">
+            <AlertCircle className="w-3.5 h-3.5" />{belvoError}
+          </p>
+        )}
+
+        {belvoAnalysis && belvoStatus === 'done' && (
+          <AnalysisCard analysis={belvoAnalysis} isDarkMode={isDarkMode} text={text} muted={muted} />
+        )}
+
+        <div className={cn('rounded-xl p-2.5 flex items-start gap-2', isDarkMode ? 'bg-white/5' : 'bg-black/3')}>
+          <Lock className={cn('w-3.5 h-3.5 flex-shrink-0 mt-0.5', muted)} />
+          <p className={cn('text-[10px] leading-snug', muted)}>
+            Tus credenciales bancarias van directamente a Belvo — Voz-Activa nunca las ve ni las almacena.
+          </p>
         </div>
       </div>
 

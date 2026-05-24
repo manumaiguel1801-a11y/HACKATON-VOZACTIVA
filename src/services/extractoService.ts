@@ -91,19 +91,25 @@ Monto: número entero en pesos colombianos, sin puntos ni $. Solo positivos.
 Solo registra transacciones de ingresos (entradas de dinero) y gastos relevantes.
 entidad: escríbela en minúsculas ("nequi", "daviplata", "davivienda", "bancolombia", "otro").`;
 
+// Handles both DD/MM/YYYY (OCR) and YYYY-MM-DD (Belvo ISO)
+function toIsoDateKey(dateStr: string): string | null {
+  if (!dateStr) return null;
+  if (/^\d{4}-\d{2}-\d{2}/.test(dateStr)) return dateStr.substring(0, 10);
+  const parts = dateStr.split('/');
+  if (parts.length === 3)
+    return `${parts[2]}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}`;
+  return null;
+}
+
 function crossReferenceWithApp(transactions: ExtractoTransaction[], sales: Sale[]): number {
   if (sales.length === 0) return 50;
 
-  // Group extracto sales by day (parse DD/MM/YYYY)
   const extractoByDay: Record<string, number> = {};
   transactions
     .filter(t => t.esVentaProbable && t.monto > 0)
     .forEach(t => {
-      const parts = t.fecha.split('/');
-      if (parts.length === 3) {
-        const key = `${parts[2]}-${parts[1].padStart(2,'0')}-${parts[0].padStart(2,'0')}`;
-        extractoByDay[key] = (extractoByDay[key] || 0) + t.monto;
-      }
+      const key = toIsoDateKey(t.fecha);
+      if (key) extractoByDay[key] = (extractoByDay[key] || 0) + t.monto;
     });
 
   const days = Object.keys(extractoByDay);
@@ -193,5 +199,40 @@ export async function analyzeExtracto(file: File, sales: Sale[]): Promise<Extrac
     scoreGeneral,
     nivel,
     resumen,
+  };
+}
+
+const ENTIDAD_LABELS: Record<string, string> = {
+  nequi: 'Nequi', daviplata: 'Daviplata',
+  davivienda: 'Davivienda', bancolombia: 'Bancolombia',
+};
+
+/** Build a full ExtractoAnalysis from pre-classified transactions (Belvo path). */
+export function buildAnalysis(
+  transactions: ExtractoTransaction[],
+  entidad: string,
+  sales: Sale[],
+): ExtractoAnalysis {
+  const ingresos            = transactions.filter(t => !['transferencia_enviada','retiro'].includes(t.tipo));
+  const totalIngresos       = ingresos.reduce((s, t) => s + t.monto, 0);
+  const ingresosVentas      = ingresos.filter(t => t.esVentaProbable).reduce((s, t) => s + t.monto, 0);
+  const ingresosTransferencias = totalIngresos - ingresosVentas;
+  const porcentajeVentas    = totalIngresos > 0 ? Math.round((ingresosVentas / totalIngresos) * 100) : 0;
+  const consistenciaConApp  = crossReferenceWithApp(transactions, sales);
+  const scoreGeneral        = Math.round(porcentajeVentas * 0.6 + consistenciaConApp * 0.4);
+  const nivel: 'alto' | 'medio' | 'bajo' = scoreGeneral >= 65 ? 'alto' : scoreGeneral >= 40 ? 'medio' : 'bajo';
+  const label               = ENTIDAD_LABELS[entidad.toLowerCase()] ?? entidad;
+
+  return {
+    entidad: entidad.toLowerCase(),
+    totalIngresos,
+    ingresosVentas,
+    ingresosTransferencias,
+    porcentajeVentas,
+    transactions,
+    consistenciaConApp,
+    scoreGeneral,
+    nivel,
+    resumen: `El ${porcentajeVentas}% de los ingresos de ${label} son pagos directos verificados. Consistencia con Voz-Activa: ${consistenciaConApp}%.`,
   };
 }
