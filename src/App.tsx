@@ -8,6 +8,7 @@ import { Tab, UserProfile, Sale, Expense, Debt, InventoryProduct } from './types
 import { Layout } from './components/Layout';
 import { Dashboard } from './components/Dashboard';
 import { FinanceView } from './components/FinanceView';
+import { ReportView } from './components/ReportView';
 import { CameraView } from './components/CameraView';
 import { InventorySalesView } from './components/InventorySalesView';
 import { PassportView } from './components/PassportView';
@@ -127,6 +128,17 @@ export default function App() {
         {activeTab === 'finanzas' && (
           <motion.div key="finanzas" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }}>
             <FinanceView
+              isDarkMode={isDarkMode}
+              sales={sales}
+              expenses={expenses}
+              userId={user.uid}
+              userName={profile?.firstName}
+            />
+          </motion.div>
+        )}
+        {activeTab === 'reporte' && (
+          <motion.div key="reporte" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }}>
+            <ReportView
               isDarkMode={isDarkMode}
               sales={sales}
               expenses={expenses}
