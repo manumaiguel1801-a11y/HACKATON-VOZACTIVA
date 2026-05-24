@@ -193,8 +193,15 @@ export default function App() {
           <motion.div key="aval" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }}>
             <AvalView
               isDarkMode={isDarkMode}
+              userId={user.uid}
               prefillCedula={profile?.idNumber}
+              profileBirthDate={profile?.birthDate}
               userName={profile?.firstName}
+              sales={sales}
+              identityVerified={profile?.identityVerified}
+              verifiedCedula={profile?.cedulaExtracted}
+              verifiedName={profile?.cedulaName}
+              onExit={() => setActiveTab('inicio')}
             />
           </motion.div>
         )}

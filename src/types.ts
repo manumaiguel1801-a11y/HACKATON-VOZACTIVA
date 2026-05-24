@@ -159,4 +159,7 @@ export interface UserProfile {
   linkCode?: { code: string; expiresAt: any };
   lastScoreCategory?: string;
   verificationCode?: { code: string; expiresAt: any };
+  identityVerified?: boolean;
+  cedulaExtracted?: string;
+  cedulaName?: string;
 }
